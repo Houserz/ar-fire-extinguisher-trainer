@@ -133,6 +133,15 @@ namespace FireExtinguisherTrainer
             }
         }
 
+        public void MoveStationToPose(Pose pose)
+        {
+            transform.SetPositionAndRotation(pose.position, pose.rotation);
+            if (availableExtinguisher != null && !availableExtinguisher.IsHeld)
+            {
+                PlaceAtSpawn(availableExtinguisher);
+            }
+        }
+
         private void QueueReplacement()
         {
             if (replacementQueued || availableExtinguisher != null)

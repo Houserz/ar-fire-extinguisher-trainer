@@ -174,7 +174,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f4688fdb7df04437aeb418b961361dc5, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Unity.TextMeshPro::TMPro.TextMeshProUGUI
   m_Material: {fileID: 0}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
@@ -2152,6 +2152,18 @@ PrefabInstance:
       propertyPath: trainingManager
       value: 
       objectReference: {fileID: 1947521671}
+    - target: {fileID: 2698176368428921693, guid: 8008771c812b64ebaba1d78a95e2567c, type: 3}
+      propertyPath: station
+      value:
+      objectReference: {fileID: 821900039}
+    - target: {fileID: 2698176368428921693, guid: 8008771c812b64ebaba1d78a95e2567c, type: 3}
+      propertyPath: holdAnchor
+      value:
+      objectReference: {fileID: 750747825}
+    - target: {fileID: 2698176368428921693, guid: 8008771c812b64ebaba1d78a95e2567c, type: 3}
+      propertyPath: trainingManager
+      value:
+      objectReference: {fileID: 1947521671}
     - target: {fileID: 2995559178162973465, guid: 8008771c812b64ebaba1d78a95e2567c, type: 3}
       propertyPath: station
       value: 
@@ -2267,7 +2279,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c7b3103d8448249ecb102a53bac066ad, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::FireExtinguisherTrainer.ExtinguisherController
 --- !u!1 &1072439598
 GameObject:
@@ -3775,6 +3787,7 @@ GameObject:
   - component: {fileID: 1947521673}
   - component: {fileID: 1947521672}
   - component: {fileID: 1947521671}
+  - component: {fileID: 1947521674}
   m_Layer: 0
   m_Name: FireTrainer_Week1
   m_TagString: Untagged
@@ -3834,6 +3847,7 @@ MonoBehaviour:
   - {fileID: 375052945}
   - {fileID: 1340517747}
   spawnOnStart: 0
+  spatialPlacement: {fileID: 1947521674}
 --- !u!4 &1947521673
 Transform:
   m_ObjectHideFlags: 0
@@ -3849,6 +3863,28 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1947521674
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1947521670}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bef0f7459e544f048a0f263944921b96, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::FireExtinguisherTrainer.SpatialTrainingPlacementManager
+  userOrigin: {fileID: 1299024149}
+  planeManager: {fileID: 0}
+  station: {fileID: 821900039}
+  preferDetectedPlanes: 1
+  fireMinDistance: 2
+  fireMaxDistance: 4
+  stationMinDistance: 0.8
+  stationMaxDistance: 1.8
+  minimumFireStationDistance: 1
+  planeEdgeMargin: 0.25
 --- !u!1 &2023373134
 GameObject:
   m_ObjectHideFlags: 0

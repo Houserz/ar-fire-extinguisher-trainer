@@ -8,6 +8,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.XR.ARFoundation;
 using Object = UnityEngine.Object;
 
 namespace FireExtinguisherTrainerEditor
@@ -79,6 +80,12 @@ namespace FireExtinguisherTrainerEditor
                 rightHand);
             SetObjectReference(station, "availableExtinguisher", stationExtinguisher);
 
+            SpatialTrainingPlacementManager placement = AddComponentIfMissing<SpatialTrainingPlacementManager>(root);
+            SetObjectReference(placement, "userOrigin", player.transform);
+            SetObjectReference(placement, "planeManager", Object.FindFirstObjectByType<ARPlaneManager>());
+            SetObjectReference(placement, "station", station);
+            SetObjectReference(spawner, "spatialPlacement", placement);
+
             ExtinguisherInteractionDriver interactionDriver = CreateOrUpdateInteractionDriver(
                 rightHand,
                 leftHand,
@@ -134,6 +141,9 @@ namespace FireExtinguisherTrainerEditor
             GameObject root = Require(GameObject.Find("FireTrainer_Week1"), "FireTrainer_Week1");
             FireSpawner spawner = Require(root.GetComponent<FireSpawner>(), "FireSpawner");
             FireTrainingManager manager = Require(root.GetComponent<FireTrainingManager>(), "FireTrainingManager");
+            SpatialTrainingPlacementManager placement = Require(
+                root.GetComponent<SpatialTrainingPlacementManager>(),
+                "SpatialTrainingPlacementManager");
             ExtinguisherStation station = Require(Object.FindFirstObjectByType<ExtinguisherStation>(), "ExtinguisherStation");
             Require(station.transform.Find("ExtinguisherSpawnPoint"), "ExtinguisherSpawnPoint");
             Transform stationExtinguisherTransform = Require(
@@ -155,6 +165,9 @@ namespace FireExtinguisherTrainerEditor
             RequireSerializedReference(interactionDriver, "leftHandAnchor", leftHand);
             RequireSerializedReference(interactionDriver, "playerCollisionRoot", player.transform);
             RequireSerializedReference(station, "availableExtinguisher", stationExtinguisher);
+            RequireSerializedReference(spawner, "spatialPlacement", placement);
+            RequireSerializedReference(placement, "userOrigin", player.transform);
+            RequireSerializedReference(placement, "station", station);
 
             SerializedProperty spawnPoints = new SerializedObject(spawner).FindProperty("spawnPoints");
             if (spawnPoints == null || !spawnPoints.isArray || spawnPoints.arraySize < 5)

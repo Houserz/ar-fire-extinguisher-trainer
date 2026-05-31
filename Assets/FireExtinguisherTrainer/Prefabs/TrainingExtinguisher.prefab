@@ -1870,10 +1870,10 @@ GameObject:
   - component: {fileID: 528790510576718824}
   - component: {fileID: 2417520355143163064}
   - component: {fileID: 2620066677796911850}
-  - component: {fileID: 5193704224432161434}
-  - component: {fileID: 1812377481673946718}
-  - component: {fileID: 5738205034173617455}
-  - component: {fileID: 2995559178162973465}
+  - component: {fileID: 878173371977650346}
+  - component: {fileID: 3060235673774592199}
+  - component: {fileID: 6610373944572880329}
+  - component: {fileID: 2698176368428921693}
   m_Layer: 0
   m_Name: TrainingExtinguisher
   m_TagString: Untagged
@@ -1953,7 +1953,7 @@ MonoBehaviour:
   localRotationEuler: {x: 0, y: -90, z: 0}
   emptyAngleDegrees: -115
   fullAngleDegrees: 115
---- !u!54 &5193704224432161434
+--- !u!54 &878173371977650346
 Rigidbody:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1980,7 +1980,7 @@ Rigidbody:
   m_Interpolate: 1
   m_Constraints: 0
   m_CollisionDetection: 2
---- !u!114 &1812377481673946718
+--- !u!114 &3060235673774592199
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1999,11 +1999,11 @@ MonoBehaviour:
   _twoGrabTransformer: {fileID: 0}
   _targetTransform: {fileID: 528790510576718824}
   _maxGrabPoints: -1
-  _rigidbody: {fileID: 5193704224432161434}
+  _rigidbody: {fileID: 878173371977650346}
   _kinematicWhileSelected: 1
   _throwWhenUnselected: 1
   _forceKinematicDisabled: 0
---- !u!114 &5738205034173617455
+--- !u!114 &6610373944572880329
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -2019,14 +2019,14 @@ MonoBehaviour:
   _maxInteractors: -1
   _maxSelectingInteractors: -1
   _data: {fileID: 0}
-  _pointableElement: {fileID: 1812377481673946718}
-  _rigidbody: {fileID: 5193704224432161434}
+  _pointableElement: {fileID: 3060235673774592199}
+  _rigidbody: {fileID: 878173371977650346}
   _grabSource: {fileID: 0}
   _useClosestPointAsGrabSource: 0
   _releaseDistance: 0
   _resetGrabOnGrabsUpdated: 1
   _physicsGrabbable: {fileID: 0}
---- !u!114 &2995559178162973465
+--- !u!114 &2698176368428921693
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}

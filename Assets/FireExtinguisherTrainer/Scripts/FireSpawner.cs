@@ -7,6 +7,7 @@ namespace FireExtinguisherTrainer
         [SerializeField] private FireTarget firePrefab;
         [SerializeField] private Transform[] spawnPoints;
         [SerializeField] private bool spawnOnStart = false;
+        [SerializeField] private SpatialTrainingPlacementManager spatialPlacement;
 
         public FireTarget CurrentFire { get; private set; }
 
@@ -31,9 +32,19 @@ namespace FireExtinguisherTrainer
                 Destroy(CurrentFire.gameObject);
             }
 
-            Transform spawnPoint = PickSpawnPoint();
-            Vector3 position = spawnPoint != null ? spawnPoint.position : transform.position + transform.forward * 2f;
-            Quaternion rotation = spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
+            Pose spatialPose = default;
+            bool useSpatialPose = spatialPlacement != null;
+            if (useSpatialPose)
+            {
+                useSpatialPose = spatialPlacement.TryPrepareTrainingLayout(out spatialPose);
+            }
+            Transform spawnPoint = useSpatialPose ? null : PickSpawnPoint();
+            Vector3 position = useSpatialPose
+                ? spatialPose.position
+                : spawnPoint != null ? spawnPoint.position : transform.position + transform.forward * 2f;
+            Quaternion rotation = useSpatialPose
+                ? spatialPose.rotation
+                : spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
 
             CurrentFire = Instantiate(firePrefab, position, rotation, null);
             CurrentFire.name = "Active Training Fire";

@@ -323,6 +323,87 @@ namespace FireExtinguisherTrainerTests
         }
 
         [Test]
+        public void SpatialPlacementFallbackCreatesForwardSafeLayout()
+        {
+            Transform user = CreateTransform("User Origin", Vector3.zero);
+            user.rotation = Quaternion.identity;
+            SpatialTrainingPlacementManager placement = CreateComponent<SpatialTrainingPlacementManager>("Spatial Placement");
+            placement.Configure(user);
+
+            Assert.IsTrue(placement.TryGetTrainingPoses(out Pose firePose, out Pose stationPose));
+
+            float fireForwardDistance = Vector3.Dot(firePose.position - user.position, user.forward);
+            float stationForwardDistance = Vector3.Dot(stationPose.position - user.position, user.forward);
+            Assert.That(fireForwardDistance, Is.InRange(2f, 4f));
+            Assert.That(stationForwardDistance, Is.InRange(0.8f, 1.8f));
+            Assert.GreaterOrEqual(FlatDistance(firePose.position, stationPose.position), 1f);
+        }
+
+        [Test]
+        public void FireSpawnerUsesSpatialPlacementAndMovesStation()
+        {
+            FireTarget firePrefab = CreateComponent<FireTarget>("Spatial Fire Prefab");
+            FireSpawner spawner = CreateComponent<FireSpawner>("Fire Spawner");
+            SetPrivateObject(spawner, "firePrefab", firePrefab);
+
+            Transform user = CreateTransform("User Origin", Vector3.zero);
+            user.rotation = Quaternion.identity;
+            ExtinguisherController extinguisherPrefab = CreateComponent<ExtinguisherController>("Spatial Extinguisher Prefab");
+            ExtinguisherStation station = CreateComponent<ExtinguisherStation>("Spatial Station");
+            Transform spawn = CreateChild(station.transform, "ExtinguisherSpawnPoint", new Vector3(0f, 0.9f, -0.08f));
+            station.Configure(extinguisherPrefab, spawn, user, null);
+            station.EnsureAvailableExtinguisher();
+            TrackStationAvailable(station);
+
+            SpatialTrainingPlacementManager placement = CreateComponent<SpatialTrainingPlacementManager>("Spatial Placement");
+            placement.Configure(user, null, station);
+            SetPrivateObject(spawner, "spatialPlacement", placement);
+
+            FireTarget spawnedFire = spawner.SpawnRandomFire();
+            createdObjects.Add(spawnedFire.gameObject);
+
+            Assert.That(Vector3.Dot(spawnedFire.transform.position - user.position, user.forward), Is.InRange(2f, 4f));
+            Assert.That(Vector3.Dot(station.transform.position - user.position, user.forward), Is.InRange(0.8f, 1.8f));
+            AssertVectorEqual(spawn.position, station.AvailableExtinguisher.transform.position);
+        }
+
+        [Test]
+        public void FireSpawnerFallsBackToFixedSpawnPointWithoutSpatialPlacement()
+        {
+            FireTarget firePrefab = CreateComponent<FireTarget>("Fixed Fire Prefab");
+            FireSpawner spawner = CreateComponent<FireSpawner>("Fire Spawner");
+            Transform spawnPoint = CreateTransform("Fixed Spawn Point", new Vector3(6f, 0f, 2f));
+            spawnPoint.rotation = Quaternion.Euler(0f, 90f, 0f);
+            SetPrivateObject(spawner, "firePrefab", firePrefab);
+            SetPrivateValue(spawner, "spawnPoints", new[] { spawnPoint });
+
+            FireTarget spawnedFire = spawner.SpawnRandomFire();
+            createdObjects.Add(spawnedFire.gameObject);
+
+            AssertVectorEqual(spawnPoint.position, spawnedFire.transform.position);
+            Assert.That(spawnedFire.transform.rotation.eulerAngles.y, Is.EqualTo(90f).Within(0.001f));
+        }
+
+        [Test]
+        public void StationMoveStationToPoseKeepsBottleAtSpawnPoint()
+        {
+            ExtinguisherController extinguisherPrefab = CreateComponent<ExtinguisherController>("Station Extinguisher Prefab");
+            Transform handAnchor = CreateTransform("Right Hand Anchor", Vector3.zero);
+            ExtinguisherStation station = CreateComponent<ExtinguisherStation>("Spatial Station");
+            Transform spawn = CreateChild(station.transform, "ExtinguisherSpawnPoint", new Vector3(0f, 0.9f, -0.08f));
+            station.Configure(extinguisherPrefab, spawn, handAnchor, null);
+            station.EnsureAvailableExtinguisher();
+            TrackStationAvailable(station);
+
+            var pose = new Pose(new Vector3(2f, 0f, 3f), Quaternion.Euler(0f, 45f, 0f));
+            station.MoveStationToPose(pose);
+
+            AssertVectorEqual(pose.position, station.transform.position);
+            Assert.That(station.transform.rotation.eulerAngles.y, Is.EqualTo(45f).Within(0.001f));
+            AssertVectorEqual(spawn.position, station.AvailableExtinguisher.transform.position);
+        }
+
+        [Test]
         public void PhysicalGrabKeepsRigidbodyDynamicAndAllowsThrowAndRegrab()
         {
             Transform handAnchor = CreateTransform("Right Hand Anchor", Vector3.zero);
@@ -1209,6 +1290,13 @@ namespace FireExtinguisherTrainerTests
             field.SetValue(target, value);
         }
 
+        private static void SetPrivateValue(object target, string fieldName, object value)
+        {
+            FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(field, $"Expected private field {fieldName} on {target.GetType().Name}.");
+            field.SetValue(target, value);
+        }
+
         private static void SetPrivateBool(object target, string fieldName, bool value)
         {
             FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -1221,6 +1309,13 @@ namespace FireExtinguisherTrainerTests
             Assert.That(actual.x, Is.EqualTo(expected.x).Within(0.001f));
             Assert.That(actual.y, Is.EqualTo(expected.y).Within(0.001f));
             Assert.That(actual.z, Is.EqualTo(expected.z).Within(0.001f));
+        }
+
+        private static float FlatDistance(Vector3 first, Vector3 second)
+        {
+            Vector2 firstFlat = new Vector2(first.x, first.z);
+            Vector2 secondFlat = new Vector2(second.x, second.z);
+            return Vector2.Distance(firstFlat, secondFlat);
         }
 
         private static ExtinguisherCapacityGauge EnsureCapacityGauge(ExtinguisherController extinguisher)

@@ -2,15 +2,13 @@
 using System;
 using System.Collections.Generic;
 using FireExtinguisherTrainer;
+using Meta.XR.MRUtilityKit;
 using Oculus.Interaction;
 using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using UnityEngine.XR.ARFoundation;
-using UnityEngine.XR.ARSubsystems;
-using Unity.XR.CoreUtils;
 using Object = UnityEngine.Object;
 
 namespace FireExtinguisherTrainerEditor
@@ -20,8 +18,8 @@ namespace FireExtinguisherTrainerEditor
         private const string ScenePath = "Assets/Scenes/FireTrainerWeek1.unity";
         private const string ExtinguisherPrefabPath = "Assets/FireExtinguisherTrainer/Prefabs/TrainingExtinguisher.prefab";
         private const string OculusProjectConfigPath = "Assets/Oculus/OculusProjectConfig.asset";
+        private const string MrukPrefabPath = "Packages/com.meta.xr.mrutilitykit/Core/Tools/MRUK.prefab";
         private const string MrSpatialOriginName = "MRSpatialOrigin";
-        private const string MrCameraFloorOffsetName = "MR Camera Floor Offset";
 
         [MenuItem("Tools/Fire Trainer/Setup Platform Training Scene")]
         public static void SetupPlatformTrainingScene()
@@ -52,8 +50,8 @@ namespace FireExtinguisherTrainerEditor
             CreateHandSphere(rightHand, "Right Hand Ball", new Color(1f, 0.15f, 0.08f, 1f));
 
             Transform platformRoot = CreatePlatform();
-            ARPlaneManager planeManager = CreateOrUpdateMrPlaneRuntime(player, rig, centerEyeCamera);
-            ConfigureOculusProjectPassthrough();
+            CreateOrUpdateMrukRuntime(player, rig, centerEyeCamera);
+            ConfigureOculusProjectMixedReality();
             Transform[] spawnPoints = CreateFireSpawnPoints(platformRoot);
             Transform stationSpawn = CreateStationVisual(platformRoot);
 
@@ -91,8 +89,8 @@ namespace FireExtinguisherTrainerEditor
             SpatialTrainingPlacementManager placement = AddComponentIfMissing<SpatialTrainingPlacementManager>(root);
             Transform placementReference = centerEyeCamera != null ? centerEyeCamera.transform : player.transform;
             SetObjectReference(placement, "userOrigin", placementReference);
-            SetObjectReference(placement, "planeManager", planeManager);
             SetObjectReference(placement, "station", station);
+            SetBool(placement, "preferMetaSceneFloor", true);
             SetFloat(placement, "fireMinDistance", 2f);
             SetFloat(placement, "fireMaxDistance", 3f);
             SetFloat(placement, "stationMinDistance", 0.8f);
@@ -148,33 +146,28 @@ namespace FireExtinguisherTrainerEditor
             Require(player.GetComponent<CharacterController>(), "FireTrainerPlayer CharacterController");
             Require(player.GetComponent<OVRPlayerController>(), "FireTrainerPlayer OVRPlayerController");
             Require(rig.GetComponentInParent<OVRPlayerController>(), "OVRCameraRig parented under OVRPlayerController");
-            if (player.GetComponent<XROrigin>() != null || player.GetComponent<ARPlaneManager>() != null)
-            {
-                throw new InvalidOperationException("FireTrainerPlayer must not own XROrigin or ARPlaneManager in MR mode.");
-            }
-
-            Require(Object.FindFirstObjectByType<ARSession>(), "ARSession");
-            GameObject spatialOriginObject = Require(GameObject.Find(MrSpatialOriginName), MrSpatialOriginName);
-            XROrigin xrOrigin = Require(spatialOriginObject.GetComponent<XROrigin>(), "MRSpatialOrigin XROrigin");
-            ARPlaneManager planeManager = Require(spatialOriginObject.GetComponent<ARPlaneManager>(), "MRSpatialOrigin ARPlaneManager");
-            if (planeManager.requestedDetectionMode != PlaneDetectionMode.Horizontal)
-            {
-                throw new InvalidOperationException("ARPlaneManager must request horizontal plane detection.");
-            }
+            RequireNoComponentType(player, "XROrigin");
+            RequireNoComponentType(player, "ARPlaneManager");
+            RequireNoSceneObject("AR Session");
+            RequireNoSceneObject(MrSpatialOriginName);
+            RequireNoSceneComponent("XROrigin");
+            RequireNoSceneComponent("ARPlaneManager");
 
             Camera centerEyeCamera = Require(rig.centerEyeAnchor != null
                 ? rig.centerEyeAnchor.GetComponent<Camera>()
                 : FindDeepChild(rig.transform, "CenterEyeAnchor")?.GetComponent<Camera>(), "CenterEyeAnchor Camera");
-            if (xrOrigin.Camera != centerEyeCamera)
+
+            MRUK mruk = Require(Object.FindFirstObjectByType<MRUK>(), "MRUK");
+            if (mruk.EnableWorldLock)
             {
-                throw new InvalidOperationException("MRSpatialOrigin XROrigin must use the center eye camera.");
+                throw new InvalidOperationException("MRUK EnableWorldLock must be disabled to avoid moving OVRCameraRig tracking space.");
             }
 
-            if (xrOrigin.CameraFloorOffsetObject == null ||
-                xrOrigin.CameraFloorOffsetObject == player ||
-                xrOrigin.CameraFloorOffsetObject == spatialOriginObject)
+            if (mruk.SceneSettings == null ||
+                mruk.SceneSettings.DataSource != MRUK.SceneDataSource.Device ||
+                !mruk.SceneSettings.LoadSceneOnStartup)
             {
-                throw new InvalidOperationException("MRSpatialOrigin needs an independent camera floor offset object.");
+                throw new InvalidOperationException("MRUK must load device scene data on startup.");
             }
 
             OVRManager ovrManager = Require(rig.GetComponent<OVRManager>(), "OVRManager");
@@ -237,13 +230,13 @@ namespace FireExtinguisherTrainerEditor
             RequireSerializedReference(station, "availableExtinguisher", stationExtinguisher);
             RequireSerializedReference(spawner, "spatialPlacement", placement);
             RequireSerializedReference(placement, "userOrigin", centerEyeCamera.transform);
-            RequireSerializedReference(placement, "planeManager", planeManager);
             RequireSerializedReference(placement, "station", station);
+            RequireSerializedBool(placement, "preferMetaSceneFloor", true);
             RequireSerializedFloat(placement, "fireMaxDistance", 3f);
             RequireSerializedFloat(placement, "stationMaxDistance", 1.4f);
             RequireSerializedFloat(placement, "fallbackGroundY", 0f);
             RequireSerializedReference(mrRuntime, "platformRoot", platform);
-            RequireSerializedReference(mrRuntime, "centerEyeCamera", xrOrigin.Camera);
+            RequireSerializedReference(mrRuntime, "centerEyeCamera", centerEyeCamera);
 
             SerializedProperty spawnPoints = new SerializedObject(spawner).FindProperty("spawnPoints");
             if (spawnPoints == null || !spawnPoints.isArray || spawnPoints.arraySize < 5)
@@ -350,43 +343,47 @@ namespace FireExtinguisherTrainerEditor
             return player;
         }
 
-        private static ARPlaneManager CreateOrUpdateMrPlaneRuntime(
+        private static MRUK CreateOrUpdateMrukRuntime(
             GameObject player,
             OVRCameraRig rig,
             Camera centerEyeCamera)
         {
-            GameObject sessionObject = FindOrCreate("AR Session");
-            AddComponentIfMissing<ARSession>(sessionObject);
-            AddComponentIfMissing<ARInputManager>(sessionObject);
+            DeleteSceneObject("AR Session");
+            DeleteSceneObject(MrSpatialOriginName);
+            RemoveComponentIfPresentByTypeName(player, "ARPlaneManager");
+            RemoveComponentIfPresentByTypeName(player, "XROrigin");
 
-            RemoveComponentIfPresent<ARPlaneManager>(player);
-            RemoveComponentIfPresent<XROrigin>(player);
-
-            GameObject spatialOrigin = FindOrCreate(MrSpatialOriginName);
-            spatialOrigin.transform.position = Vector3.zero;
-            spatialOrigin.transform.rotation = Quaternion.identity;
-            spatialOrigin.transform.localScale = Vector3.one;
-
-            Transform cameraFloorOffset = spatialOrigin.transform.Find(MrCameraFloorOffsetName);
-            if (cameraFloorOffset == null)
+            MRUK mruk = Object.FindFirstObjectByType<MRUK>();
+            if (mruk == null)
             {
-                cameraFloorOffset = new GameObject(MrCameraFloorOffsetName).transform;
-                cameraFloorOffset.SetParent(spatialOrigin.transform, false);
+                GameObject mrukPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(MrukPrefabPath);
+                GameObject mrukObject = mrukPrefab != null
+                    ? PrefabUtility.InstantiatePrefab(mrukPrefab) as GameObject
+                    : new GameObject("MRUK");
+                if (mrukObject == null)
+                {
+                    mrukObject = new GameObject("MRUK");
+                }
+
+                mrukObject.name = "MRUK";
+                mruk = AddComponentIfMissing<MRUK>(mrukObject);
             }
 
-            cameraFloorOffset.localPosition = Vector3.zero;
-            cameraFloorOffset.localRotation = Quaternion.identity;
-            cameraFloorOffset.localScale = Vector3.one;
+            mruk.gameObject.name = "MRUK";
+            mruk.transform.SetParent(null, false);
+            mruk.transform.position = Vector3.zero;
+            mruk.transform.rotation = Quaternion.identity;
+            mruk.transform.localScale = Vector3.one;
+            mruk.EnableWorldLock = false;
+            if (mruk.SceneSettings == null)
+            {
+                mruk.SceneSettings = new MRUK.MRUKSettings();
+            }
 
-            XROrigin xrOrigin = AddComponentIfMissing<XROrigin>(spatialOrigin);
-            xrOrigin.Camera = centerEyeCamera;
-            xrOrigin.Origin = spatialOrigin;
-            xrOrigin.CameraFloorOffsetObject = cameraFloorOffset.gameObject;
-            xrOrigin.RequestedTrackingOriginMode = XROrigin.TrackingOriginMode.Floor;
-
-            ARPlaneManager planeManager = AddComponentIfMissing<ARPlaneManager>(spatialOrigin);
-            planeManager.requestedDetectionMode = PlaneDetectionMode.Horizontal;
-            planeManager.planePrefab = null;
+            mruk.SceneSettings.DataSource = MRUK.SceneDataSource.Device;
+            mruk.SceneSettings.LoadSceneOnStartup = true;
+            mruk.SceneSettings.EnableHighFidelityScene = false;
+            EditorUtility.SetDirty(mruk);
 
             if (centerEyeCamera != null)
             {
@@ -409,10 +406,10 @@ namespace FireExtinguisherTrainerEditor
                 EditorUtility.SetDirty(passthroughLayer);
             }
 
-            return planeManager;
+            return mruk;
         }
 
-        private static void ConfigureOculusProjectPassthrough()
+        private static void ConfigureOculusProjectMixedReality()
         {
             Object config = AssetDatabase.LoadAssetAtPath<Object>(OculusProjectConfigPath);
             if (config == null)
@@ -423,6 +420,8 @@ namespace FireExtinguisherTrainerEditor
 
             SerializedObject serializedObject = new SerializedObject(config);
             bool changed = false;
+            changed |= SetSerializedIntAtLeastIfPresent(serializedObject, "anchorSupport", 1);
+            changed |= SetSerializedIntAtLeastIfPresent(serializedObject, "sceneSupport", 2);
             changed |= SetSerializedIntAtLeastIfPresent(serializedObject, "_insightPassthroughSupport", 1);
             changed |= SetSerializedBoolIfPresent(serializedObject, "isPassthroughCameraAccessEnabled", true);
 
@@ -902,6 +901,22 @@ namespace FireExtinguisherTrainerEditor
             }
         }
 
+        private static void RemoveComponentIfPresentByTypeName(GameObject gameObject, string componentTypeName)
+        {
+            if (gameObject == null)
+            {
+                return;
+            }
+
+            foreach (Component component in gameObject.GetComponents<Component>())
+            {
+                if (component != null && component.GetType().Name == componentTypeName)
+                {
+                    Object.DestroyImmediate(component);
+                }
+            }
+        }
+
         private static Transform FindDeepChild(Transform parent, string childName)
         {
             if (parent == null)
@@ -1029,6 +1044,44 @@ namespace FireExtinguisherTrainerEditor
             return value;
         }
 
+        private static void RequireNoSceneObject(string objectName)
+        {
+            if (GameObject.Find(objectName) != null)
+            {
+                throw new InvalidOperationException($"{objectName} must not exist in the MRUK Quest demo scene.");
+            }
+        }
+
+        private static void RequireNoComponentType(GameObject gameObject, string componentTypeName)
+        {
+            if (gameObject == null)
+            {
+                return;
+            }
+
+            foreach (Component component in gameObject.GetComponents<Component>())
+            {
+                if (component != null && component.GetType().Name == componentTypeName)
+                {
+                    throw new InvalidOperationException($"{gameObject.name} must not own {componentTypeName} in MRUK mode.");
+                }
+            }
+        }
+
+        private static void RequireNoSceneComponent(string componentTypeName)
+        {
+            foreach (GameObject sceneObject in Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None))
+            {
+                foreach (Component component in sceneObject.GetComponents<Component>())
+                {
+                    if (component != null && component.GetType().Name == componentTypeName)
+                    {
+                        throw new InvalidOperationException($"{componentTypeName} must not exist in the MRUK Quest demo scene.");
+                    }
+                }
+            }
+        }
+
         private static void RequireSerializedReference(Object target, string propertyName, Object expectedValue)
         {
             SerializedProperty property = new SerializedObject(target).FindProperty(propertyName);
@@ -1057,6 +1110,8 @@ namespace FireExtinguisherTrainerEditor
                 AssetDatabase.LoadAssetAtPath<Object>(OculusProjectConfigPath),
                 "OculusProjectConfig asset");
             SerializedObject serializedObject = new SerializedObject(config);
+            RequireSerializedIntAtLeast(serializedObject, "anchorSupport", 1, "Oculus project anchor support");
+            RequireSerializedIntAtLeast(serializedObject, "sceneSupport", 2, "Oculus project scene support");
             RequireSerializedIntAtLeast(serializedObject, "_insightPassthroughSupport", 1, "Oculus project passthrough support");
             RequireSerializedBool(serializedObject, "isPassthroughCameraAccessEnabled", true, "Oculus passthrough camera access");
         }

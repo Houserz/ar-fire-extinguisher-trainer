@@ -70,6 +70,7 @@ namespace FireExtinguisherTrainer
         private bool waitingForSpatialPlacement;
         private float spatialScanElapsedSeconds;
         private SpatialPlacementSource currentPlacementSource;
+        private string currentPlacementMessage;
 
 #if UNITY_EDITOR
         private bool debugInputActive;
@@ -263,7 +264,8 @@ namespace FireExtinguisherTrainer
             activeFire = null;
             currentStep = PassStep.PullPin;
             currentPlacementSource = SpatialPlacementSource.None;
-            status = "Scanning for a horizontal surface...";
+            currentPlacementMessage = "Scanning for Meta room floor data...";
+            status = currentPlacementMessage;
             resultReason = status;
             return true;
         }
@@ -274,6 +276,7 @@ namespace FireExtinguisherTrainer
             if (placement == null)
             {
                 waitingForSpatialPlacement = false;
+                currentPlacementMessage = "Spatial placement manager missing; using FireSpawner fixed fallback.";
                 StartTrainingWithFire(fireSpawner != null ? fireSpawner.SpawnRandomFire() : null);
                 return;
             }
@@ -285,7 +288,9 @@ namespace FireExtinguisherTrainer
             }
 
             spatialScanElapsedSeconds += FrameDeltaTime;
-            status = "Scanning for a horizontal surface...";
+            status = string.IsNullOrWhiteSpace(placement.LastPlacementMessage)
+                ? "Scanning for Meta room floor data..."
+                : placement.LastPlacementMessage;
             resultReason = status;
             if (spatialScanElapsedSeconds < Mathf.Max(0f, spatialScanTimeoutSeconds))
             {
@@ -299,6 +304,7 @@ namespace FireExtinguisherTrainer
             }
 
             waitingForSpatialPlacement = false;
+            currentPlacementMessage = "Spatial placement failed and fixed fallback was used.";
             StartTrainingWithFire(fireSpawner != null ? fireSpawner.SpawnRandomFire() : null);
         }
 
@@ -306,6 +312,7 @@ namespace FireExtinguisherTrainer
         {
             waitingForSpatialPlacement = false;
             currentPlacementSource = layout.Source;
+            currentPlacementMessage = layout.Message;
             StartTrainingWithFire(fireSpawner != null ? fireSpawner.SpawnFireAt(layout) : null);
         }
 
@@ -348,6 +355,9 @@ namespace FireExtinguisherTrainer
             currentPlacementSource = fireSpawner != null
                 ? fireSpawner.LastPlacementSource
                 : SpatialPlacementSource.None;
+            currentPlacementMessage = fireSpawner != null
+                ? fireSpawner.LastPlacementMessage
+                : currentPlacementMessage;
 
             status = BuildInitialStatus(carriedExtinguisher);
 
@@ -356,10 +366,11 @@ namespace FireExtinguisherTrainer
                 CountExtinguisherUse(carriedExtinguisher);
             }
 
-            if (activeFire == null || (extinguisher == null && extinguisherStation == null))
+            string setupFailure = ValidateStartedTrainingObjects();
+            if (!string.IsNullOrEmpty(setupFailure))
             {
-                FailTraining("Training setup is missing a fire or extinguisher reference.");
-                Debug.LogWarning(status, this);
+                FailTraining(setupFailure);
+                Debug.LogError(status, this);
             }
         }
 
@@ -387,6 +398,86 @@ namespace FireExtinguisherTrainer
             countedExtinguishers.Clear();
         }
 
+        private string ValidateStartedTrainingObjects()
+        {
+            if (activeFire == null)
+            {
+                return fireSpawner != null && !string.IsNullOrWhiteSpace(fireSpawner.LastPlacementMessage)
+                    ? fireSpawner.LastPlacementMessage
+                    : "Fire did not spawn: FireTrainingManager has no active fire.";
+            }
+
+            if (extinguisherStation != null)
+            {
+                ExtinguisherController available = extinguisherStation.AvailableExtinguisher;
+                if (available == null)
+                {
+                    return string.IsNullOrWhiteSpace(extinguisherStation.LastStationMessage)
+                        ? "Extinguisher did not spawn: station has no available bottle."
+                        : extinguisherStation.LastStationMessage;
+                }
+            }
+            else if (extinguisher == null)
+            {
+                return "Extinguisher did not spawn: no station or direct extinguisher reference is configured.";
+            }
+
+            if (currentPlacementSource == SpatialPlacementSource.MetaSceneFloor ||
+                currentPlacementSource == SpatialPlacementSource.Fallback)
+            {
+                string firePoseFailure = ValidateSpatialObjectPose("fire", activeFire.transform.position);
+                if (!string.IsNullOrEmpty(firePoseFailure))
+                {
+                    return firePoseFailure;
+                }
+
+                if (extinguisherStation != null)
+                {
+                    string stationPoseFailure = ValidateSpatialObjectPose("extinguisher station", extinguisherStation.transform.position);
+                    if (!string.IsNullOrEmpty(stationPoseFailure))
+                    {
+                        return stationPoseFailure;
+                    }
+                }
+            }
+
+            Debug.Log(
+                $"Training objects ready. fire={activeFire.transform.position:F2}, station={(extinguisherStation != null ? extinguisherStation.transform.position.ToString("F2") : "none")}, source={currentPlacementSource}, message={currentPlacementMessage}",
+                this);
+            return null;
+        }
+
+        private string ValidateSpatialObjectPose(string label, Vector3 position)
+        {
+            if (playerCamera == null)
+            {
+                return null;
+            }
+
+            Transform reference = playerCamera.transform;
+            Vector3 forward = Vector3.ProjectOnPlane(reference.forward, Vector3.up);
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                forward = Vector3.forward;
+            }
+
+            forward.Normalize();
+            Vector3 flatDelta = new Vector3(position.x - reference.position.x, 0f, position.z - reference.position.z);
+            float forwardDistance = Vector3.Dot(flatDelta, forward);
+            float flatDistance = flatDelta.magnitude;
+            if (forwardDistance <= 0.1f)
+            {
+                return $"Spawned {label} is behind the headset. position={position:F2}, source={currentPlacementSource}.";
+            }
+
+            if (flatDistance > Mathf.Max(maximumUsefulDistance + 2f, 6f))
+            {
+                return $"Spawned {label} is too far from the headset. position={position:F2}, distance={flatDistance:F2}m, source={currentPlacementSource}.";
+            }
+
+            return null;
+        }
+
         private ExtinguisherController GetReusableHeldExtinguisher()
         {
             ExtinguisherController driverHeld = interactionDriver != null
@@ -408,11 +499,16 @@ namespace FireExtinguisherTrainer
 
         private string BuildInitialStatus(ExtinguisherController carriedExtinguisher)
         {
-            string placementPrefix = currentPlacementSource == SpatialPlacementSource.DetectedPlane
+            string placementPrefix = currentPlacementSource == SpatialPlacementSource.MetaSceneFloor ||
+                                     currentPlacementSource == SpatialPlacementSource.DetectedPlane
                 ? "Horizontal surface locked. "
                 : currentPlacementSource == SpatialPlacementSource.Fallback
                     ? "Using fallback placement. "
                     : string.Empty;
+            if (!string.IsNullOrWhiteSpace(currentPlacementMessage))
+            {
+                placementPrefix = currentPlacementMessage + " ";
+            }
 
             if (carriedExtinguisher != null)
             {
@@ -1167,7 +1263,9 @@ namespace FireExtinguisherTrainer
         {
             if (waitingForSpatialPlacement)
             {
-                return "Scanning for a horizontal surface...";
+                return string.IsNullOrWhiteSpace(status)
+                    ? "Scanning for Meta room floor data..."
+                    : status;
             }
 
             if (outcome != TrainingOutcome.Running)

@@ -59,6 +59,13 @@ namespace FireExtinguisherTrainer
             }
 
 #if META_MR_SDK_INSTALLED
+            Meta.XR.MRUtilityKit.MRUK mruk = FindFirstObjectByType<Meta.XR.MRUtilityKit.MRUK>();
+            if (mruk != null && mruk.EnableWorldLock)
+            {
+                mruk.EnableWorldLock = false;
+                Debug.LogWarning("Disabled MRUK EnableWorldLock so it cannot move the OVRCameraRig tracking space.", this);
+            }
+
             OVRManager manager = FindFirstObjectByType<OVRManager>();
             if (manager != null)
             {

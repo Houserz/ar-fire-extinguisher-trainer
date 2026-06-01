@@ -12,6 +12,7 @@ namespace FireExtinguisherTrainer
         public FireTarget CurrentFire { get; private set; }
         public SpatialTrainingPlacementManager SpatialPlacement => spatialPlacement;
         public SpatialPlacementSource LastPlacementSource { get; private set; } = SpatialPlacementSource.None;
+        public string LastPlacementMessage { get; private set; } = "Fire has not spawned yet.";
 
         private void Start()
         {
@@ -25,7 +26,8 @@ namespace FireExtinguisherTrainer
         {
             if (firePrefab == null)
             {
-                Debug.LogWarning("FireSpawner needs a fire prefab.", this);
+                LastPlacementMessage = "Fire did not spawn: FireSpawner needs a fire prefab.";
+                Debug.LogError(LastPlacementMessage, this);
                 return null;
             }
 
@@ -38,6 +40,9 @@ namespace FireExtinguisherTrainer
             Transform spawnPoint = PickSpawnPoint();
             Vector3 position = spawnPoint != null ? spawnPoint.position : transform.position + transform.forward * 2f;
             Quaternion rotation = spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
+            LastPlacementMessage = spawnPoint != null
+                ? $"Using fixed fire spawn point {spawnPoint.name}."
+                : "Using fixed fire fallback from FireSpawner transform.";
 
             return SpawnFireAt(position, rotation, SpatialPlacementSource.None);
         }
@@ -45,11 +50,14 @@ namespace FireExtinguisherTrainer
         public FireTarget SpawnFireAt(SpatialTrainingLayout layout)
         {
             spatialPlacement?.ApplyLayout(layout);
+            LastPlacementMessage = string.IsNullOrWhiteSpace(layout.Message)
+                ? $"Spatial training placement source: {layout.Source}."
+                : layout.Message;
             float fireStationDistance = Vector3.Distance(
                 new Vector3(layout.FirePose.position.x, 0f, layout.FirePose.position.z),
                 new Vector3(layout.StationPose.position.x, 0f, layout.StationPose.position.z));
             Debug.Log(
-                $"Spatial training placement {layout.Source}: fire={layout.FirePose.position:F2}, station={layout.StationPose.position:F2}, fireStationDistance={fireStationDistance:F2}m",
+                $"Spatial training placement {layout.Source}: fire={layout.FirePose.position:F2}, station={layout.StationPose.position:F2}, fireStationDistance={fireStationDistance:F2}m, message={LastPlacementMessage}",
                 this);
             return SpawnFireAt(layout.FirePose.position, layout.FirePose.rotation, layout.Source);
         }
@@ -63,7 +71,8 @@ namespace FireExtinguisherTrainer
         {
             if (firePrefab == null)
             {
-                Debug.LogWarning("FireSpawner needs a fire prefab.", this);
+                LastPlacementMessage = "Fire did not spawn: FireSpawner needs a fire prefab.";
+                Debug.LogError(LastPlacementMessage, this);
                 return null;
             }
 
@@ -77,6 +86,7 @@ namespace FireExtinguisherTrainer
             CurrentFire.name = "Active Training Fire";
             CurrentFire.transform.SetParent(null, true);
             CurrentFire.ResetFire();
+            Debug.Log($"Spawned training fire at {position:F2}, source={placementSource}.", this);
             return CurrentFire;
         }
 

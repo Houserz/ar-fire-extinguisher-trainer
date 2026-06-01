@@ -28,6 +28,7 @@ namespace FireExtinguisherTrainer
     public enum SpatialPlacementSource
     {
         None,
+        MetaSceneFloor,
         DetectedPlane,
         Fallback
     }
@@ -37,12 +38,18 @@ namespace FireExtinguisherTrainer
         public Pose FirePose;
         public Pose StationPose;
         public SpatialPlacementSource Source;
+        public string Message;
 
-        public SpatialTrainingLayout(Pose firePose, Pose stationPose, SpatialPlacementSource source)
+        public SpatialTrainingLayout(
+            Pose firePose,
+            Pose stationPose,
+            SpatialPlacementSource source,
+            string message = null)
         {
             FirePose = firePose;
             StationPose = stationPose;
             Source = source;
+            Message = message;
         }
     }
 

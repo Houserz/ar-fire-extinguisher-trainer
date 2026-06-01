@@ -19,6 +19,7 @@ namespace FireExtinguisherTrainer
         public ExtinguisherController AvailableExtinguisher => availableExtinguisher;
         public bool WaitingForEmptyDrop => waitingForEmptyDrop;
         public bool ReplacementQueued => replacementQueued;
+        public string LastStationMessage { get; private set; } = "Station has not spawned an extinguisher yet.";
 
         private void Start()
         {
@@ -90,12 +91,14 @@ namespace FireExtinguisherTrainer
             {
                 PlaceAtSpawn(availableExtinguisher);
                 ConfigureSpawnedExtinguisher(availableExtinguisher);
+                LastStationMessage = $"Extinguisher ready at station spawn point {SpawnPointName}.";
                 return availableExtinguisher;
             }
 
             if (extinguisherPrefab == null)
             {
-                Debug.LogWarning("ExtinguisherStation needs an extinguisher prefab.", this);
+                LastStationMessage = "Extinguisher did not spawn: ExtinguisherStation needs an extinguisher prefab.";
+                Debug.LogError(LastStationMessage, this);
                 return null;
             }
 
@@ -106,6 +109,7 @@ namespace FireExtinguisherTrainer
             ConfigureSpawnedExtinguisher(spawned);
             PlaceAtSpawn(spawned);
             availableExtinguisher = spawned;
+            LastStationMessage = $"Spawned extinguisher at station spawn point {SpawnPointName}.";
             return availableExtinguisher;
         }
 
@@ -208,6 +212,7 @@ namespace FireExtinguisherTrainer
         {
             if (extinguisher == null || spawnPoint == null)
             {
+                LastStationMessage = "Extinguisher placement skipped: missing extinguisher or station spawn point.";
                 return;
             }
 
@@ -217,12 +222,16 @@ namespace FireExtinguisherTrainer
             Rigidbody rigidbody = extinguisher.GetComponent<Rigidbody>();
             if (rigidbody == null)
             {
+                LastStationMessage = $"Extinguisher placed at {spawnPoint.position:F2}, but no Rigidbody was found.";
                 return;
             }
 
             rigidbody.linearVelocity = Vector3.zero;
             rigidbody.angularVelocity = Vector3.zero;
             rigidbody.Sleep();
+            LastStationMessage = $"Extinguisher placed at {spawnPoint.position:F2}.";
         }
+
+        private string SpawnPointName => spawnPoint != null ? spawnPoint.name : transform.name;
     }
 }

@@ -6,6 +6,7 @@ using FireExtinguisherTrainer;
 using NUnit.Framework;
 using TMPro;
 using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace FireExtinguisherTrainerTests
 {
@@ -335,6 +336,7 @@ namespace FireExtinguisherTrainerTests
             float fireForwardDistance = Vector3.Dot(layout.FirePose.position - user.position, user.forward);
             float stationForwardDistance = Vector3.Dot(layout.StationPose.position - user.position, user.forward);
             Assert.AreEqual(SpatialPlacementSource.Fallback, layout.Source);
+            Assert.That(layout.Message, Does.Contain("fallback"));
             Assert.That(fireForwardDistance, Is.InRange(2f, 3f));
             Assert.That(stationForwardDistance, Is.InRange(0.8f, 1.4f));
             Assert.GreaterOrEqual(FlatDistance(layout.FirePose.position, layout.StationPose.position), 1f);
@@ -398,8 +400,10 @@ namespace FireExtinguisherTrainerTests
             placement.Configure(user);
 
             Assert.IsFalse(placement.TryGetTrainingLayout(allowFallback: false, out _));
+            Assert.That(placement.LastPlacementMessage, Does.Contain("MRUK floor unavailable"));
             Assert.IsTrue(placement.TryGetTrainingLayout(allowFallback: true, out SpatialTrainingLayout layout));
             Assert.AreEqual(SpatialPlacementSource.Fallback, layout.Source);
+            Assert.That(layout.Message, Does.Contain("MRUK floor unavailable"));
         }
 
         [Test]
@@ -474,6 +478,37 @@ namespace FireExtinguisherTrainerTests
             Assert.AreEqual(TrainingOutcome.Running, manager.CurrentReport.Outcome);
             Assert.That(manager.CurrentReport.Status, Does.Contain("fallback"));
             AssertVectorEqual(spawn.position, station.AvailableExtinguisher.transform.position);
+        }
+
+        [Test]
+        public void FireTrainingManagerReportsVisibleErrorWhenStationCannotSpawnBottle()
+        {
+            FireTarget firePrefab = CreateComponent<FireTarget>("Diagnostic Fire Prefab");
+            FireSpawner spawner = CreateComponent<FireSpawner>("Diagnostic Fire Spawner");
+            SetPrivateObject(spawner, "firePrefab", firePrefab);
+
+            Transform user = CreateTransform("User Origin", Vector3.zero);
+            ExtinguisherStation station = CreateComponent<ExtinguisherStation>("Broken Station");
+            Transform spawn = CreateChild(station.transform, "ExtinguisherSpawnPoint", new Vector3(0f, 0.9f, -0.08f));
+            station.Configure(null, spawn, user, null);
+
+            SpatialTrainingPlacementManager placement = CreateComponent<SpatialTrainingPlacementManager>("Diagnostic Spatial Placement");
+            placement.Configure(user, null, station);
+            SetPrivateObject(spawner, "spatialPlacement", placement);
+
+            FireTrainingManager manager = CreateComponent<FireTrainingManager>("Diagnostic Training Manager");
+            SetPrivateObject(manager, "fireSpawner", spawner);
+            SetPrivateObject(manager, "extinguisherStation", station);
+
+            LogAssert.Expect(LogType.Error, "Extinguisher did not spawn: ExtinguisherStation needs an extinguisher prefab.");
+            LogAssert.Expect(LogType.Error, "Extinguisher did not spawn: ExtinguisherStation needs an extinguisher prefab. Press A / Enter to restart.");
+            manager.BeginTraining();
+
+            Assert.AreEqual(TrainingOutcome.Failed, manager.CurrentReport.Outcome);
+            Assert.That(manager.CurrentReport.Status, Does.Contain("Extinguisher did not spawn"));
+            Assert.That(manager.CurrentReport.ResultReason, Does.Contain("Extinguisher did not spawn"));
+            Assert.IsNotNull(spawner.CurrentFire);
+            createdObjects.Add(spawner.CurrentFire.gameObject);
         }
 
         [Test]
@@ -1038,11 +1073,16 @@ namespace FireExtinguisherTrainerTests
             Assert.That(setupText, Does.Contain("ExtinguisherCapacityGauge"));
             Assert.That(setupText, Does.Contain("SafetyPinRingName"));
             Assert.That(setupText, Does.Contain("SafetyPinLabelName"));
-            Assert.That(setupText, Does.Contain("MRSpatialOrigin"));
-            Assert.That(setupText, Does.Contain("RemoveComponentIfPresent<ARPlaneManager>(player)"));
-            Assert.That(setupText, Does.Contain("RemoveComponentIfPresent<XROrigin>(player)"));
-            Assert.That(setupText, Does.Contain("xrOrigin.CameraFloorOffsetObject = cameraFloorOffset.gameObject"));
+            Assert.That(setupText, Does.Contain("MRUK.prefab"));
+            Assert.That(setupText, Does.Contain("mruk.EnableWorldLock = false"));
+            Assert.That(setupText, Does.Contain("DeleteSceneObject(\"AR Session\")"));
+            Assert.That(setupText, Does.Contain("DeleteSceneObject(MrSpatialOriginName)"));
+            Assert.That(setupText, Does.Contain("RemoveComponentIfPresentByTypeName(player, \"ARPlaneManager\")"));
+            Assert.That(setupText, Does.Contain("RemoveComponentIfPresentByTypeName(player, \"XROrigin\")"));
+            Assert.That(setupText, Does.Contain("sceneSupport\", 2"));
+            Assert.That(setupText, Does.Contain("anchorSupport\", 1"));
             Assert.That(setupText, Does.Contain("SetObjectReference(placement, \"userOrigin\", placementReference)"));
+            Assert.That(setupText, Does.Contain("SetBool(placement, \"preferMetaSceneFloor\", true)"));
             Assert.That(setupText, Does.Contain("spatialScanTimeoutSeconds\", 3f"));
 
             string weekSetupPath = Path.Combine(

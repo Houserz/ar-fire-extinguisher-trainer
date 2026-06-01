@@ -8,17 +8,45 @@ namespace FireExtinguisherTrainer
         [SerializeField] private GameObject platformRoot;
         [SerializeField] private Camera centerEyeCamera;
         [SerializeField] private bool hidePlatformInMrRuntime = true;
+        [SerializeField] private bool hideHandIndicatorsInMrRuntime = true;
 
         private void Awake()
         {
+            ApplyTrackingStability();
             ConfigurePassthrough();
             ApplyRuntimePlatformVisibility();
+        }
+
+        private void Start()
+        {
+            ApplyTrackingStability();
         }
 
         public void Configure(GameObject fixedPlatform, Camera passthroughCamera = null)
         {
             platformRoot = fixedPlatform;
             centerEyeCamera = passthroughCamera;
+        }
+
+        public void ApplyTrackingStability()
+        {
+#if META_MR_SDK_INSTALLED
+            foreach (OVRPlayerController playerController in FindObjectsByType<OVRPlayerController>(FindObjectsSortMode.None))
+            {
+                playerController.EnableLinearMovement = false;
+                playerController.EnableRotation = false;
+                playerController.HmdResetsY = false;
+                playerController.HmdRotatesY = false;
+                playerController.SetHaltUpdateMovement(true);
+                playerController.SetMoveScaleMultiplier(0f);
+            }
+
+            OVRManager manager = FindFirstObjectByType<OVRManager>();
+            if (manager != null)
+            {
+                manager.trackingOriginType = OVRManager.TrackingOrigin.FloorLevel;
+            }
+#endif
         }
 
         public void ApplyPlatformVisibility(bool hide)
@@ -48,6 +76,10 @@ namespace FireExtinguisherTrainer
         private void ApplyRuntimePlatformVisibility()
         {
             ApplyPlatformVisibility(hidePlatformInMrRuntime && ShouldUseMrRuntimeView());
+            if (hideHandIndicatorsInMrRuntime && ShouldUseMrRuntimeView())
+            {
+                ApplyHandIndicatorVisibility(false);
+            }
         }
 
         private void ConfigurePassthrough()
@@ -70,6 +102,7 @@ namespace FireExtinguisherTrainer
             if (manager != null)
             {
                 manager.isInsightPassthroughEnabled = true;
+                manager.trackingOriginType = OVRManager.TrackingOrigin.FloorLevel;
             }
 
             OVRPassthroughLayer passthroughLayer = FindFirstObjectByType<OVRPassthroughLayer>();
@@ -98,6 +131,34 @@ namespace FireExtinguisherTrainer
             return candidate != null &&
                    (candidate.name == "Platform Floor" ||
                     candidate.name.StartsWith("Wall ", System.StringComparison.Ordinal));
+        }
+
+        private static void ApplyHandIndicatorVisibility(bool visible)
+        {
+            foreach (Renderer renderer in FindObjectsByType<Renderer>(FindObjectsSortMode.None))
+            {
+                if (!IsHandIndicator(renderer.transform))
+                {
+                    continue;
+                }
+
+                renderer.enabled = visible;
+            }
+
+            foreach (Collider collider in FindObjectsByType<Collider>(FindObjectsSortMode.None))
+            {
+                if (IsHandIndicator(collider.transform))
+                {
+                    collider.enabled = visible;
+                }
+            }
+        }
+
+        private static bool IsHandIndicator(Transform candidate)
+        {
+            return candidate != null &&
+                   (candidate.name == "Left Hand Ball" ||
+                    candidate.name == "Right Hand Ball");
         }
     }
 }

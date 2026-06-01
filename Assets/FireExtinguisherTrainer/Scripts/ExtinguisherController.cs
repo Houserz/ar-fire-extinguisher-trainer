@@ -100,6 +100,46 @@ namespace FireExtinguisherTrainer
             rigidbody.maxAngularVelocity = Mathf.Min(rigidbody.maxAngularVelocity, stableMaxAngularVelocity);
         }
 
+        public void SetDockedPhysicsState(bool docked)
+        {
+            Rigidbody rigidbody = GetComponent<Rigidbody>();
+            if (rigidbody == null)
+            {
+                return;
+            }
+
+            ConfigureRigidbodyPhysics();
+            rigidbody.interpolation = RigidbodyInterpolation.Interpolate;
+
+            if (docked)
+            {
+                if (!rigidbody.isKinematic)
+                {
+                    rigidbody.linearVelocity = Vector3.zero;
+                    rigidbody.angularVelocity = Vector3.zero;
+                }
+
+                rigidbody.useGravity = false;
+                rigidbody.isKinematic = true;
+                rigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+                rigidbody.Sleep();
+#if UNITY_EDITOR
+                UnityEditor.EditorUtility.SetDirty(rigidbody);
+#endif
+                return;
+            }
+
+            rigidbody.isKinematic = false;
+            rigidbody.useGravity = true;
+            rigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            rigidbody.linearVelocity = Vector3.zero;
+            rigidbody.angularVelocity = Vector3.zero;
+            rigidbody.WakeUp();
+#if UNITY_EDITOR
+            UnityEditor.EditorUtility.SetDirty(rigidbody);
+#endif
+        }
+
         public void MarkPickedUp(Transform holdAnchor, bool snapToAnchor = true)
         {
             IsHeld = true;
@@ -283,6 +323,15 @@ namespace FireExtinguisherTrainer
             text.color = new Color(1f, 0.95f, 0.25f, 1f);
             text.enableWordWrapping = false;
             text.richText = false;
+            if (text.font == null)
+            {
+                TMP_FontAsset fontAsset = TMP_Settings.GetFontAsset();
+                if (fontAsset != null)
+                {
+                    text.font = fontAsset;
+                }
+            }
+
             safetyPinLabel = label;
         }
 

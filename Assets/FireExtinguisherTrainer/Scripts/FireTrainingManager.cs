@@ -29,6 +29,10 @@ namespace FireExtinguisherTrainer
         [SerializeField] private bool waitForSpatialPlacementOnStart = false;
         [SerializeField] private float spatialScanTimeoutSeconds = 4f;
 
+        [Header("Diagnostics")]
+        [SerializeField] private bool requireCameraVisibleSpatialObjects = true;
+        [SerializeField] private bool logSpatialVisibilityDiagnostics = true;
+
         [Header("Intro")]
         [SerializeField] private bool showIntroOnFirstStart = true;
         [SerializeField] private float introMinimumSeconds = 2.5f;
@@ -407,10 +411,11 @@ namespace FireExtinguisherTrainer
                     : "Fire did not spawn: FireTrainingManager has no active fire.";
             }
 
+            ExtinguisherController availableExtinguisher = null;
             if (extinguisherStation != null)
             {
-                ExtinguisherController available = extinguisherStation.AvailableExtinguisher;
-                if (available == null)
+                availableExtinguisher = extinguisherStation.AvailableExtinguisher;
+                if (availableExtinguisher == null)
                 {
                     return string.IsNullOrWhiteSpace(extinguisherStation.LastStationMessage)
                         ? "Extinguisher did not spawn: station has no available bottle."
@@ -423,20 +428,34 @@ namespace FireExtinguisherTrainer
             }
 
             if (currentPlacementSource == SpatialPlacementSource.MetaSceneFloor ||
+                currentPlacementSource == SpatialPlacementSource.DetectedPlane ||
                 currentPlacementSource == SpatialPlacementSource.Fallback)
             {
-                string firePoseFailure = ValidateSpatialObjectPose("fire", activeFire.transform.position);
-                if (!string.IsNullOrEmpty(firePoseFailure))
+                string fireFailure = ValidateSpatialObjectReady("Fire", activeFire.gameObject, activeFire.transform.position);
+                if (!string.IsNullOrEmpty(fireFailure))
                 {
-                    return firePoseFailure;
+                    return fireFailure;
                 }
 
                 if (extinguisherStation != null)
                 {
-                    string stationPoseFailure = ValidateSpatialObjectPose("extinguisher station", extinguisherStation.transform.position);
-                    if (!string.IsNullOrEmpty(stationPoseFailure))
+                    string stationFailure = ValidateSpatialObjectReady(
+                        "Extinguisher station",
+                        extinguisherStation.gameObject,
+                        extinguisherStation.transform.position,
+                        availableExtinguisher.transform);
+                    if (!string.IsNullOrEmpty(stationFailure))
                     {
-                        return stationPoseFailure;
+                        return stationFailure;
+                    }
+
+                    string bottleFailure = ValidateSpatialObjectReady(
+                        "Station extinguisher",
+                        availableExtinguisher.gameObject,
+                        availableExtinguisher.transform.position);
+                    if (!string.IsNullOrEmpty(bottleFailure))
+                    {
+                        return bottleFailure;
                     }
                 }
             }
@@ -447,11 +466,154 @@ namespace FireExtinguisherTrainer
             return null;
         }
 
+        private string ValidateSpatialObjectReady(
+            string label,
+            GameObject root,
+            Vector3 position,
+            Transform ignoredRendererRoot = null)
+        {
+            if (root == null)
+            {
+                return $"{label} did not spawn: object reference is missing.";
+            }
+
+            if (!root.activeInHierarchy)
+            {
+                return $"{label} spawned but is inactive. source={currentPlacementSource}.";
+            }
+
+            string poseFailure = ValidateSpatialObjectPose(label, position);
+            if (!string.IsNullOrEmpty(poseFailure))
+            {
+                return poseFailure;
+            }
+
+            Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+            if (renderers == null || renderers.Length == 0)
+            {
+                return $"{label} spawned but no renderer was found. position={position:F2}, source={currentPlacementSource}.";
+            }
+
+            bool hasRenderer = false;
+            bool hasEnabledRenderer = false;
+            bool hasCameraRenderableLayer = playerCamera == null;
+            bool hasStableBoundsRenderer = HasStableSpatialBoundsRenderer(renderers, ignoredRendererRoot);
+            int boundsRendererCount = 0;
+            Bounds combinedBounds = default;
+            foreach (Renderer renderer in renderers)
+            {
+                if (renderer == null ||
+                    (ignoredRendererRoot != null && renderer.transform.IsChildOf(ignoredRendererRoot)))
+                {
+                    continue;
+                }
+
+                hasRenderer = true;
+                if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+
+                hasEnabledRenderer = true;
+                if (hasStableBoundsRenderer && !IsStableSpatialBoundsRenderer(renderer))
+                {
+                    continue;
+                }
+
+                boundsRendererCount++;
+                Bounds bounds = renderer.bounds;
+                if (!IsFinite(bounds.center) || !IsFinite(bounds.extents))
+                {
+                    return $"{label} spawned but renderer bounds are invalid. position={position:F2}, source={currentPlacementSource}.";
+                }
+
+                if (boundsRendererCount == 1)
+                {
+                    combinedBounds = bounds;
+                }
+                else
+                {
+                    combinedBounds.Encapsulate(bounds);
+                }
+
+                if (playerCamera != null && CameraCanRenderLayer(renderer.gameObject.layer))
+                {
+                    hasCameraRenderableLayer = true;
+                }
+            }
+
+            if (!hasRenderer)
+            {
+                return $"{label} spawned but no renderer was found. position={position:F2}, source={currentPlacementSource}.";
+            }
+
+            if (!hasEnabledRenderer)
+            {
+                return $"{label} spawned but no enabled renderer was found. position={position:F2}, source={currentPlacementSource}.";
+            }
+
+            if (boundsRendererCount == 0)
+            {
+                return $"{label} spawned but no renderer could be used for visibility bounds. position={position:F2}, source={currentPlacementSource}.";
+            }
+
+            if (!hasCameraRenderableLayer)
+            {
+                return $"{label} spawned but the headset camera culling mask hides its renderer layer. layer={LayerMask.LayerToName(root.layer)}({root.layer}), cullingMask={playerCamera.cullingMask}, position={position:F2}, source={currentPlacementSource}.";
+            }
+
+            string cameraFailure = ValidateSpatialObjectCameraVisibility(label, position, combinedBounds, boundsRendererCount);
+            if (!string.IsNullOrEmpty(cameraFailure))
+            {
+                return cameraFailure;
+            }
+
+            if (logSpatialVisibilityDiagnostics)
+            {
+                Debug.Log(
+                    $"{label} visibility diagnostic: position={position:F2}, boundsCenter={combinedBounds.center:F2}, boundsSize={combinedBounds.size:F2}, viewport={(playerCamera != null ? playerCamera.WorldToViewportPoint(combinedBounds.center).ToString("F2") : "no-camera")}, boundsRenderers={boundsRendererCount}, source={currentPlacementSource}.",
+                    this);
+            }
+
+            return null;
+        }
+
+        private static bool HasStableSpatialBoundsRenderer(Renderer[] renderers, Transform ignoredRendererRoot)
+        {
+            foreach (Renderer renderer in renderers)
+            {
+                if (renderer == null ||
+                    !renderer.enabled ||
+                    !renderer.gameObject.activeInHierarchy ||
+                    (ignoredRendererRoot != null && renderer.transform.IsChildOf(ignoredRendererRoot)))
+                {
+                    continue;
+                }
+
+                if (IsStableSpatialBoundsRenderer(renderer))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsStableSpatialBoundsRenderer(Renderer renderer)
+        {
+            return renderer != null && !(renderer is ParticleSystemRenderer);
+        }
+
         private string ValidateSpatialObjectPose(string label, Vector3 position)
         {
             if (playerCamera == null)
             {
                 return null;
+            }
+
+            if (!IsFinite(position))
+            {
+                return $"{label} spawned at an invalid position. position={position:F2}, source={currentPlacementSource}.";
             }
 
             Transform reference = playerCamera.transform;
@@ -467,15 +629,64 @@ namespace FireExtinguisherTrainer
             float flatDistance = flatDelta.magnitude;
             if (forwardDistance <= 0.1f)
             {
-                return $"Spawned {label} is behind the headset. position={position:F2}, source={currentPlacementSource}.";
+                return $"{label} spawned behind the headset. position={position:F2}, source={currentPlacementSource}.";
             }
 
             if (flatDistance > Mathf.Max(maximumUsefulDistance + 2f, 6f))
             {
-                return $"Spawned {label} is too far from the headset. position={position:F2}, distance={flatDistance:F2}m, source={currentPlacementSource}.";
+                return $"{label} spawned too far from the headset. position={position:F2}, distance={flatDistance:F2}m, source={currentPlacementSource}.";
             }
 
             return null;
+        }
+
+        private string ValidateSpatialObjectCameraVisibility(
+            string label,
+            Vector3 position,
+            Bounds bounds,
+            int enabledRendererCount)
+        {
+            if (!requireCameraVisibleSpatialObjects || playerCamera == null)
+            {
+                return null;
+            }
+
+            Vector3 viewportCenter = playerCamera.WorldToViewportPoint(bounds.center);
+            if (!IsFinite(viewportCenter))
+            {
+                return $"{label} spawned but camera viewport coordinates are invalid. position={position:F2}, boundsCenter={bounds.center:F2}, source={currentPlacementSource}.";
+            }
+
+            bool inFrontOfCamera = viewportCenter.z > playerCamera.nearClipPlane;
+            bool intersectsFrustum = GeometryUtility.TestPlanesAABB(
+                GeometryUtility.CalculateFrustumPlanes(playerCamera),
+                bounds);
+            if (!inFrontOfCamera || !intersectsFrustum)
+            {
+                return $"{label} spawned but is outside the headset camera view. position={position:F2}, boundsCenter={bounds.center:F2}, boundsSize={bounds.size:F2}, viewport={viewportCenter:F2}, inFront={inFrontOfCamera}, inFrustum={intersectsFrustum}, renderers={enabledRendererCount}, source={currentPlacementSource}.";
+            }
+
+            return null;
+        }
+
+        private bool CameraCanRenderLayer(int layer)
+        {
+            if (playerCamera == null || layer < 0 || layer > 31)
+            {
+                return true;
+            }
+
+            return (playerCamera.cullingMask & (1 << layer)) != 0;
+        }
+
+        private static bool IsFinite(Vector3 value)
+        {
+            return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
         }
 
         private ExtinguisherController GetReusableHeldExtinguisher()

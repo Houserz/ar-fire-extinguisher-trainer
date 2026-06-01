@@ -198,6 +198,7 @@ namespace FireExtinguisherTrainer
 
             EnsureHandBody();
             target.transform.SetParent(null, true);
+            target.SetDockedPhysicsState(false);
             targetBody.isKinematic = false;
             targetBody.useGravity = true;
             targetBody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;

@@ -4,6 +4,12 @@ using UnityEngine.UI;
 
 namespace FireExtinguisherTrainer
 {
+    public enum HudAnchorMode
+    {
+        WorldLocked = 0,
+        HeadLocked = 1,
+    }
+
     public class TrainingHUD : MonoBehaviour
     {
         [SerializeField] private TextMeshProUGUI stepText;
@@ -15,14 +21,135 @@ namespace FireExtinguisherTrainer
         [SerializeField] private Slider fireSlider;
         [SerializeField] private GameObject resultPanel;
         [SerializeField] private GameObject introPanel;
-        [SerializeField] private bool detachFromCameraRigOnStart = true;
+        [SerializeField] private HudAnchorMode anchorMode = HudAnchorMode.WorldLocked;
+        [SerializeField] private bool detachFromCameraRigOnStart = false;
+        [SerializeField] private bool followHeadsetInRuntime = false;
+        [SerializeField] private Transform headsetAnchor;
+        [SerializeField] private Vector3 headsetLocalPosition = new Vector3(0f, -0.18f, 1.25f);
+        [SerializeField] private Vector3 headsetLocalEulerAngles = Vector3.zero;
+        [SerializeField] private float headsetLocalScale = 0.00125f;
 
         public bool IntroVisible => introPanel != null && introPanel.activeSelf;
+        public HudAnchorMode AnchorMode => anchorMode;
+
+        private bool worldLockedPoseInitialized;
 
         private void Start()
         {
             ResolveReferencesIfNeeded();
-            DetachFromHeadsetIfNeeded();
+            if (anchorMode == HudAnchorMode.HeadLocked)
+            {
+                if (followHeadsetInRuntime)
+                {
+                    ApplyHeadLockedPose();
+                }
+                else
+                {
+                    DetachFromHeadsetIfNeeded();
+                }
+            }
+            else
+            {
+                ApplyWorldLockedPose();
+            }
+        }
+
+        private void LateUpdate()
+        {
+            if (anchorMode == HudAnchorMode.HeadLocked && followHeadsetInRuntime)
+            {
+                ApplyHeadLockedPose();
+            }
+            else if (anchorMode == HudAnchorMode.WorldLocked && !worldLockedPoseInitialized)
+            {
+                ApplyWorldLockedPose();
+            }
+        }
+
+        public void ConfigureHeadLocked(Transform anchor, Camera worldCamera = null)
+        {
+            anchorMode = HudAnchorMode.HeadLocked;
+            headsetAnchor = anchor;
+            followHeadsetInRuntime = true;
+            detachFromCameraRigOnStart = false;
+            worldLockedPoseInitialized = false;
+            Canvas canvas = GetComponent<Canvas>();
+            if (canvas != null && worldCamera != null)
+            {
+                canvas.worldCamera = worldCamera;
+            }
+
+            ApplyHeadLockedPose();
+        }
+
+        public void ConfigureWorldLocked(Transform reference, Camera worldCamera = null)
+        {
+            anchorMode = HudAnchorMode.WorldLocked;
+            Transform resolvedReference = reference != null
+                ? reference
+                : worldCamera != null
+                    ? worldCamera.transform
+                    : null;
+            headsetAnchor = resolvedReference;
+            followHeadsetInRuntime = false;
+            detachFromCameraRigOnStart = false;
+            worldLockedPoseInitialized = false;
+            Canvas canvas = GetComponent<Canvas>();
+            if (canvas != null && worldCamera != null)
+            {
+                canvas.worldCamera = worldCamera;
+            }
+
+            ApplyWorldLockedPose(resolvedReference);
+        }
+
+        public bool ApplyWorldLockedPose(Transform reference = null)
+        {
+            Transform anchor = reference != null ? reference : ResolveHeadsetAnchor();
+            if (anchor == null)
+            {
+                return false;
+            }
+
+            Vector3 forward = Vector3.ProjectOnPlane(anchor.forward, Vector3.up);
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                forward = Vector3.forward;
+            }
+
+            forward.Normalize();
+            Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
+            Vector3 position = anchor.position +
+                right * headsetLocalPosition.x +
+                Vector3.up * headsetLocalPosition.y +
+                forward * Mathf.Max(0.01f, headsetLocalPosition.z);
+            Quaternion rotation = Quaternion.LookRotation(forward, Vector3.up) *
+                Quaternion.Euler(headsetLocalEulerAngles);
+
+            transform.SetParent(null, true);
+            transform.SetPositionAndRotation(position, rotation);
+            transform.localScale = Vector3.one * Mathf.Max(0.0001f, headsetLocalScale);
+            worldLockedPoseInitialized = true;
+            return true;
+        }
+
+        public void ApplyHeadLockedPose()
+        {
+            Transform anchor = ResolveHeadsetAnchor();
+            if (anchor == null)
+            {
+                return;
+            }
+
+            if (transform.parent != anchor)
+            {
+                transform.SetParent(anchor, false);
+            }
+
+            transform.localPosition = headsetLocalPosition;
+            transform.localRotation = Quaternion.Euler(headsetLocalEulerAngles);
+            transform.localScale = Vector3.one * Mathf.Max(0.0001f, headsetLocalScale);
+            worldLockedPoseInitialized = false;
         }
 
         public void SetRunning(
@@ -247,11 +374,13 @@ namespace FireExtinguisherTrainer
                 introText = textObject.AddComponent<TextMeshProUGUI>();
                 introText.color = Color.white;
                 introText.raycastTarget = false;
+                AssignDefaultFontIfAvailable(introText);
             }
         }
 
         private static void PrepareText(TextMeshProUGUI text, float minimumSize, float maximumSize)
         {
+            AssignDefaultFontIfAvailable(text);
             text.enableAutoSizing = true;
             text.fontSizeMin = minimumSize;
             text.fontSizeMax = maximumSize;
@@ -376,6 +505,37 @@ namespace FireExtinguisherTrainer
                 }
 
                 current = current.parent;
+            }
+        }
+
+        private Transform ResolveHeadsetAnchor()
+        {
+            if (headsetAnchor != null)
+            {
+                return headsetAnchor;
+            }
+
+            Camera mainCamera = Camera.main;
+            if (mainCamera != null)
+            {
+                headsetAnchor = mainCamera.transform;
+                return headsetAnchor;
+            }
+
+            return null;
+        }
+
+        private static void AssignDefaultFontIfAvailable(TextMeshProUGUI text)
+        {
+            if (text == null || text.font != null)
+            {
+                return;
+            }
+
+            TMP_FontAsset fontAsset = TMP_Settings.GetFontAsset();
+            if (fontAsset != null)
+            {
+                text.font = fontAsset;
             }
         }
 

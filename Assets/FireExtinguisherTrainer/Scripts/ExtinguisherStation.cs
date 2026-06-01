@@ -80,6 +80,10 @@ namespace FireExtinguisherTrainer
             }
 
             ConfigureSpawnedExtinguisher(availableExtinguisher);
+            if (!availableExtinguisher.IsHeld)
+            {
+                PlaceAtSpawn(availableExtinguisher);
+            }
         }
 
         public ExtinguisherController EnsureAvailableExtinguisher()
@@ -190,6 +194,11 @@ namespace FireExtinguisherTrainer
 
         private void ConfigureSpawnedExtinguisher(ExtinguisherController spawned)
         {
+            if (spawned.GetComponent<Rigidbody>() == null)
+            {
+                spawned.gameObject.AddComponent<Rigidbody>();
+            }
+
             spawned.ConfigureRigidbodyPhysics();
             ExtinguisherCapacityGauge gauge = spawned.GetComponent<ExtinguisherCapacityGauge>();
             if (gauge == null)
@@ -226,9 +235,7 @@ namespace FireExtinguisherTrainer
                 return;
             }
 
-            rigidbody.linearVelocity = Vector3.zero;
-            rigidbody.angularVelocity = Vector3.zero;
-            rigidbody.Sleep();
+            extinguisher.SetDockedPhysicsState(true);
             LastStationMessage = $"Extinguisher placed at {spawnPoint.position:F2}.";
         }
 

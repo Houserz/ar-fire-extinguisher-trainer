@@ -1,10 +1,10 @@
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
+using TMPro;
 using FireExtinguisherTrainer;
 using Meta.XR.MRUtilityKit;
 using Oculus.Interaction;
-using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -18,12 +18,15 @@ namespace FireExtinguisherTrainerEditor
         private const string ScenePath = "Assets/Scenes/FireTrainerWeek1.unity";
         private const string ExtinguisherPrefabPath = "Assets/FireExtinguisherTrainer/Prefabs/TrainingExtinguisher.prefab";
         private const string OculusProjectConfigPath = "Assets/Oculus/OculusProjectConfig.asset";
+        private const string OpenXrPackageSettingsPath = "Assets/XR/Settings/OpenXRPackageSettings.asset";
+        private const string ImmersiveDebuggerSettingsPath = "Assets/Resources/ImmersiveDebuggerSettings.asset";
         private const string MrukPrefabPath = "Packages/com.meta.xr.mrutilitykit/Core/Tools/MRUK.prefab";
         private const string MrSpatialOriginName = "MRSpatialOrigin";
 
         [MenuItem("Tools/Fire Trainer/Setup Platform Training Scene")]
         public static void SetupPlatformTrainingScene()
         {
+            FireTrainerEditorResources.EnsureTextMeshProEssentialResources();
             Scene scene = OpenScene();
             GameObject extinguisherPrefab = PrepareExtinguisherPrefab();
             if (extinguisherPrefab == null)
@@ -46,12 +49,14 @@ namespace FireExtinguisherTrainerEditor
                 : FindDeepChild(rig.transform, "CenterEyeAnchor");
             Camera centerEyeCamera = centerEye != null ? centerEye.GetComponent<Camera>() : Camera.main;
 
-            CreateHandSphere(leftHand, "Left Hand Ball", new Color(0.1f, 0.55f, 1f, 1f));
-            CreateHandSphere(rightHand, "Right Hand Ball", new Color(1f, 0.15f, 0.08f, 1f));
+            DeleteChildIfPresent(leftHand, "Left Hand Ball");
+            DeleteChildIfPresent(rightHand, "Right Hand Ball");
 
             Transform platformRoot = CreatePlatform();
             CreateOrUpdateMrukRuntime(player, rig, centerEyeCamera);
             ConfigureOculusProjectMixedReality();
+            ConfigureOpenXrOcclusionFeature();
+            ConfigureImmersiveDebuggerSettings();
             Transform[] spawnPoints = CreateFireSpawnPoints(platformRoot);
             Transform stationSpawn = CreateStationVisual(platformRoot);
 
@@ -97,13 +102,22 @@ namespace FireExtinguisherTrainerEditor
             SetFloat(placement, "stationMaxDistance", 1.4f);
             SetFloat(placement, "minimumFireStationDistance", 1f);
             SetFloat(placement, "fallbackGroundY", 0f);
+            SetFloat(placement, "floorRaycastStartHeight", 2.5f);
+            SetFloat(placement, "floorRaycastDistance", 5f);
+            SetFloat(placement, "minimumFloorNormalY", 0.65f);
+            SetFloat(placement, "maximumFloorHeightDelta", 1.25f);
+            SetInt(placement, "generatedFloorSampleAttempts", 8);
+            SetFloat(placement, "fireFloorOffset", 0.05f);
+            SetFloat(placement, "stationFloorOffset", 0.02f);
             SetObjectReference(spawner, "spatialPlacement", placement);
 
             MixedRealityTrainingRuntime mrRuntime = AddComponentIfMissing<MixedRealityTrainingRuntime>(root);
             mrRuntime.Configure(platformRoot.gameObject, centerEyeCamera);
+            mrRuntime.ApplyTrackingStability();
             SetObjectReference(mrRuntime, "platformRoot", platformRoot.gameObject);
             SetObjectReference(mrRuntime, "centerEyeCamera", centerEyeCamera);
             SetBool(mrRuntime, "hidePlatformInMrRuntime", true);
+            SetBool(mrRuntime, "hideHandIndicatorsInMrRuntime", true);
 
             ExtinguisherInteractionDriver interactionDriver = CreateOrUpdateInteractionDriver(
                 rightHand,
@@ -114,13 +128,28 @@ namespace FireExtinguisherTrainerEditor
 
             SetObjectReference(manager, "extinguisherStation", station);
             SetObjectReference(manager, "interactionDriver", interactionDriver);
-            SetObjectReference(manager, "hud", Object.FindFirstObjectByType<TrainingHUD>());
+            TrainingHUD hud = Object.FindFirstObjectByType<TrainingHUD>();
+            if (hud != null)
+            {
+                hud.ConfigureWorldLocked(centerEye, centerEyeCamera);
+                SetEnum(hud, "anchorMode", (int)HudAnchorMode.WorldLocked);
+                SetBool(hud, "detachFromCameraRigOnStart", false);
+                SetBool(hud, "followHeadsetInRuntime", false);
+                SetObjectReference(hud, "headsetAnchor", centerEye);
+                SetVector3(hud, "headsetLocalPosition", new Vector3(0f, -0.18f, 1.25f));
+                SetVector3(hud, "headsetLocalEulerAngles", Vector3.zero);
+                SetFloat(hud, "headsetLocalScale", 0.00125f);
+            }
+
+            SetObjectReference(manager, "hud", hud);
             SetObjectReference(manager, "playerCamera", centerEyeCamera);
             SetObjectReference(manager, "rayOriginOverride", rightHand);
             SetObjectReference(manager, "extinguisher", null);
             SetInt(manager, "totalExtinguishers", 0);
             SetBool(manager, "waitForSpatialPlacementOnStart", true);
             SetFloat(manager, "spatialScanTimeoutSeconds", 3f);
+            SetBool(manager, "requireCameraVisibleSpatialObjects", true);
+            SetBool(manager, "logSpatialVisibilityDiagnostics", true);
             SetBool(manager, "showIntroOnFirstStart", true);
             SetFloat(manager, "introMinimumSeconds", 2.5f);
             SetFloat(manager, "introAutoDismissSeconds", 18f);
@@ -139,13 +168,15 @@ namespace FireExtinguisherTrainerEditor
         [MenuItem("Tools/Fire Trainer/Validate Platform Training Scene")]
         public static void ValidatePlatformTrainingScene()
         {
+            FireTrainerEditorResources.RequireTextMeshProEssentialResources();
             OpenScene();
 
             OVRCameraRig rig = Require(Object.FindFirstObjectByType<OVRCameraRig>(), "OVRCameraRig");
             GameObject player = Require(GameObject.Find("FireTrainerPlayer"), "FireTrainerPlayer");
             Require(player.GetComponent<CharacterController>(), "FireTrainerPlayer CharacterController");
-            Require(player.GetComponent<OVRPlayerController>(), "FireTrainerPlayer OVRPlayerController");
+            OVRPlayerController playerController = Require(player.GetComponent<OVRPlayerController>(), "FireTrainerPlayer OVRPlayerController");
             Require(rig.GetComponentInParent<OVRPlayerController>(), "OVRCameraRig parented under OVRPlayerController");
+            RequireOvrLocomotionDisabled(playerController);
             RequireNoComponentType(player, "XROrigin");
             RequireNoComponentType(player, "ARPlaneManager");
             RequireNoSceneObject("AR Session");
@@ -176,6 +207,11 @@ namespace FireExtinguisherTrainerEditor
                 throw new InvalidOperationException("OVRManager passthrough must be enabled.");
             }
 
+            if (ovrManager.trackingOriginType != OVRManager.TrackingOrigin.FloorLevel)
+            {
+                throw new InvalidOperationException("OVRManager tracking origin must be FloorLevel for stable MR fallback placement.");
+            }
+
             OVRPassthroughLayer passthroughLayer = Require(rig.GetComponent<OVRPassthroughLayer>(), "OVRPassthroughLayer");
             if (passthroughLayer.hidden || passthroughLayer.overlayType != OVROverlay.OverlayType.Underlay)
             {
@@ -183,11 +219,13 @@ namespace FireExtinguisherTrainerEditor
             }
 
             RequireOculusProjectPassthroughConfig();
+            RequireOpenXrOcclusionDisabled();
+            RequireImmersiveDebuggerDisabled();
 
             Transform leftHand = Require(FindDeepChild(rig.transform, "LeftControllerAnchor"), "LeftControllerAnchor");
             Transform rightHand = Require(FindDeepChild(rig.transform, "RightControllerAnchor"), "RightControllerAnchor");
-            Require(leftHand.Find("Left Hand Ball"), "Left hand sphere");
-            Require(rightHand.Find("Right Hand Ball"), "Right hand sphere");
+            RequireNoEnabledRendererIfPresent(leftHand.Find("Left Hand Ball"), "Left hand sphere");
+            RequireNoEnabledRendererIfPresent(rightHand.Find("Right Hand Ball"), "Right hand sphere");
             Transform driverTransform = Require(rightHand.Find("ExtinguisherInteractionDriver"), "ExtinguisherInteractionDriver");
 
             GameObject platform = Require(GameObject.Find("FireTrainer_Platform"), "FireTrainer_Platform");
@@ -206,6 +244,7 @@ namespace FireExtinguisherTrainerEditor
                 root.GetComponent<MixedRealityTrainingRuntime>(),
                 "MixedRealityTrainingRuntime");
             ExtinguisherStation station = Require(Object.FindFirstObjectByType<ExtinguisherStation>(), "ExtinguisherStation");
+            RequireEnabledRenderer(station.transform, "ExtinguisherStation visual");
             Require(station.transform.Find("ExtinguisherSpawnPoint"), "ExtinguisherSpawnPoint");
             Transform stationExtinguisherTransform = Require(
                 station.transform.Find("Station Extinguisher"),
@@ -213,6 +252,7 @@ namespace FireExtinguisherTrainerEditor
             ExtinguisherController stationExtinguisher = Require(
                 stationExtinguisherTransform.GetComponent<ExtinguisherController>(),
                 "Station Extinguisher ExtinguisherController");
+            RequireEnabledRenderer(stationExtinguisherTransform, "Station Extinguisher visual");
             ExtinguisherInteractionDriver interactionDriver = Require(
                 driverTransform.GetComponent<ExtinguisherInteractionDriver>(),
                 "ExtinguisherInteractionDriver");
@@ -222,6 +262,8 @@ namespace FireExtinguisherTrainerEditor
             RequireSerializedReference(manager, "rayOriginOverride", rightHand);
             RequireSerializedBool(manager, "waitForSpatialPlacementOnStart", true);
             RequireSerializedFloat(manager, "spatialScanTimeoutSeconds", 3f);
+            RequireSerializedBool(manager, "requireCameraVisibleSpatialObjects", true);
+            RequireSerializedBool(manager, "logSpatialVisibilityDiagnostics", true);
             RequireSerializedReference(interactionDriver, "trainingManager", manager);
             RequireSerializedReference(interactionDriver, "station", station);
             RequireSerializedReference(interactionDriver, "rightHandAnchor", rightHand);
@@ -235,14 +277,37 @@ namespace FireExtinguisherTrainerEditor
             RequireSerializedFloat(placement, "fireMaxDistance", 3f);
             RequireSerializedFloat(placement, "stationMaxDistance", 1.4f);
             RequireSerializedFloat(placement, "fallbackGroundY", 0f);
+            RequireSerializedFloat(placement, "floorRaycastStartHeight", 2.5f);
+            RequireSerializedFloat(placement, "floorRaycastDistance", 5f);
+            RequireSerializedFloat(placement, "fireFloorOffset", 0.05f);
+            RequireSerializedFloat(placement, "stationFloorOffset", 0.02f);
             RequireSerializedReference(mrRuntime, "platformRoot", platform);
             RequireSerializedReference(mrRuntime, "centerEyeCamera", centerEyeCamera);
+            RequireSerializedBool(mrRuntime, "hideHandIndicatorsInMrRuntime", true);
+
+            TrainingHUD hud = Require(Object.FindFirstObjectByType<TrainingHUD>(), "TrainingHUD");
+            RequireSerializedReference(manager, "hud", hud);
+            RequireSerializedReference(hud, "headsetAnchor", centerEyeCamera.transform);
+            RequireSerializedEnum(hud, "anchorMode", (int)HudAnchorMode.WorldLocked);
+            RequireSerializedBool(hud, "detachFromCameraRigOnStart", false);
+            RequireSerializedBool(hud, "followHeadsetInRuntime", false);
+            RequireSerializedFloat(hud, "headsetLocalScale", 0.00125f);
+            RequireSerializedVector3(hud, "headsetLocalPosition", new Vector3(0f, -0.18f, 1.25f));
+            if (IsChildOfCameraRig(hud.transform))
+            {
+                throw new InvalidOperationException("TrainingHUD must be world locked and must not be parented to CenterEyeAnchor or OVRCameraRig.");
+            }
 
             SerializedProperty spawnPoints = new SerializedObject(spawner).FindProperty("spawnPoints");
             if (spawnPoints == null || !spawnPoints.isArray || spawnPoints.arraySize < 5)
             {
                 throw new InvalidOperationException("FireSpawner needs five platform spawn points.");
             }
+
+            FireTarget firePrefab = new SerializedObject(spawner).FindProperty("firePrefab")?.objectReferenceValue as FireTarget;
+            Require(firePrefab, "FireSpawner fire prefab");
+            RequireEnabledRenderer(firePrefab.transform, "FireSpawner fire prefab visual");
+            RequireLocalFireParticles(firePrefab);
 
             GameObject prefab = Require(AssetDatabase.LoadAssetAtPath<GameObject>(ExtinguisherPrefabPath), "TrainingExtinguisher prefab");
             Rigidbody prefabRigidbody = Require(prefab.GetComponent<Rigidbody>(), "TrainingExtinguisher Rigidbody");
@@ -333,9 +398,13 @@ namespace FireExtinguisherTrainerEditor
             playerController.Damping = 0.35f;
             playerController.BackAndSideDampen = 0.65f;
             playerController.SnapRotation = true;
-            playerController.EnableLinearMovement = true;
-            playerController.EnableRotation = true;
+            playerController.EnableLinearMovement = false;
+            playerController.EnableRotation = false;
+            playerController.HmdResetsY = false;
+            playerController.HmdRotatesY = false;
             playerController.RotationEitherThumbstick = false;
+            playerController.SetHaltUpdateMovement(true);
+            playerController.SetMoveScaleMultiplier(0f);
 
             rig.transform.SetParent(player.transform, false);
             rig.transform.localPosition = Vector3.zero;
@@ -395,6 +464,7 @@ namespace FireExtinguisherTrainerEditor
             {
                 OVRManager ovrManager = AddComponentIfMissing<OVRManager>(rig.gameObject);
                 ovrManager.isInsightPassthroughEnabled = true;
+                ovrManager.trackingOriginType = OVRManager.TrackingOrigin.FloorLevel;
                 SetBool(ovrManager, "isInsightPassthroughEnabled", true);
                 EditorUtility.SetDirty(ovrManager);
 
@@ -429,6 +499,41 @@ namespace FireExtinguisherTrainerEditor
             {
                 serializedObject.ApplyModifiedProperties();
                 EditorUtility.SetDirty(config);
+            }
+        }
+
+        private static void ConfigureImmersiveDebuggerSettings()
+        {
+            Object settings = AssetDatabase.LoadAssetAtPath<Object>(ImmersiveDebuggerSettingsPath);
+            if (settings == null)
+            {
+                return;
+            }
+
+            SerializedObject serializedObject = new SerializedObject(settings);
+            if (SetSerializedBoolIfPresent(serializedObject, "immersiveDebuggerEnabled", false) |
+                SetSerializedBoolIfPresent(serializedObject, "immersiveDebuggerDisplayAtStartup", false))
+            {
+                serializedObject.ApplyModifiedProperties();
+                EditorUtility.SetDirty(settings);
+            }
+        }
+
+        private static void ConfigureOpenXrOcclusionFeature()
+        {
+            Object occlusionFeature = FindOpenXrFeature("AROcclusionFeature Android");
+            if (occlusionFeature == null)
+            {
+                Debug.LogWarning("Could not find Android Meta Quest Occlusion OpenXR feature; real-world depth may hide training objects.");
+                return;
+            }
+
+            SerializedObject serializedObject = new SerializedObject(occlusionFeature);
+            if (SetSerializedBoolIfPresent(serializedObject, "m_enabled", false) |
+                SetSerializedBoolIfPresent(serializedObject, "m_EnableHandRemoval", false))
+            {
+                serializedObject.ApplyModifiedProperties();
+                EditorUtility.SetDirty(occlusionFeature);
             }
         }
 
@@ -676,6 +781,7 @@ namespace FireExtinguisherTrainerEditor
             text.color = new Color(1f, 0.95f, 0.25f, 1f);
             text.enableWordWrapping = false;
             text.richText = false;
+            FireTrainerEditorResources.ApplyDefaultFont(text);
         }
 
         private static void CreateSafetyPinSegment(
@@ -821,28 +927,18 @@ namespace FireExtinguisherTrainerEditor
             return spawn;
         }
 
-        private static void CreateHandSphere(Transform parent, string name, Color color)
+        private static void DeleteChildIfPresent(Transform parent, string childName)
         {
             if (parent == null)
             {
                 return;
             }
 
-            Transform existing = parent.Find(name);
-            GameObject sphere = existing != null ? existing.gameObject : GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            sphere.name = name;
-            sphere.transform.SetParent(parent, false);
-            sphere.transform.localPosition = Vector3.zero;
-            sphere.transform.localRotation = Quaternion.identity;
-            sphere.transform.localScale = Vector3.one * 0.11f;
-
-            Collider collider = sphere.GetComponent<Collider>();
-            if (collider != null)
+            Transform child = parent.Find(childName);
+            if (child != null)
             {
-                Object.DestroyImmediate(collider);
+                Object.DestroyImmediate(child.gameObject);
             }
-
-            sphere.GetComponent<Renderer>().sharedMaterial = CreateMaterial(name.Replace(" ", "_"), color);
         }
 
         private static GameObject CreatePrimitiveChild(Transform parent, string name, PrimitiveType primitiveType, Vector3 position, Vector3 scale, Color color)
@@ -868,14 +964,37 @@ namespace FireExtinguisherTrainerEditor
 
             string path = $"{folder}/{name}.mat";
             Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            Shader shader =
+                Shader.Find("Universal Render Pipeline/Unlit") ??
+                Shader.Find("Unlit/Color") ??
+                Shader.Find("Sprites/Default") ??
+                Shader.Find("Standard");
             if (material == null)
             {
-                Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
                 material = new Material(shader);
                 AssetDatabase.CreateAsset(material, path);
             }
+            else if (shader != null && material.shader != shader)
+            {
+                material.shader = shader;
+            }
 
             material.color = color;
+            if (material.HasProperty("_BaseColor"))
+            {
+                material.SetColor("_BaseColor", color);
+            }
+
+            if (material.HasProperty("_Color"))
+            {
+                material.SetColor("_Color", color);
+            }
+
+            if (material.HasProperty("_EmissionColor"))
+            {
+                material.SetColor("_EmissionColor", color * 1.35f);
+            }
+
             EditorUtility.SetDirty(material);
             return material;
         }
@@ -1010,6 +1129,18 @@ namespace FireExtinguisherTrainerEditor
             }
         }
 
+        private static void SetEnum(Object target, string propertyName, int value)
+        {
+            SerializedObject serializedObject = new SerializedObject(target);
+            SerializedProperty property = serializedObject.FindProperty(propertyName);
+            if (property != null && property.propertyType == SerializedPropertyType.Enum)
+            {
+                property.enumValueIndex = value;
+                serializedObject.ApplyModifiedProperties();
+                EditorUtility.SetDirty(target);
+            }
+        }
+
         private static void SetFloat(Object target, string propertyName, float value)
         {
             SerializedObject serializedObject = new SerializedObject(target);
@@ -1082,6 +1213,52 @@ namespace FireExtinguisherTrainerEditor
             }
         }
 
+        private static void RequireOvrLocomotionDisabled(OVRPlayerController playerController)
+        {
+            if (playerController.EnableLinearMovement ||
+                playerController.EnableRotation ||
+                playerController.HmdResetsY ||
+                playerController.HmdRotatesY)
+            {
+                throw new InvalidOperationException("OVRPlayerController locomotion and HMD root rotation must be disabled for the MR Quest demo.");
+            }
+        }
+
+        private static void RequireEnabledRenderer(Transform root, string label)
+        {
+            Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+            if (renderers == null || renderers.Length == 0)
+            {
+                throw new InvalidOperationException($"{label} must have a renderer so MR placement failures are visible.");
+            }
+
+            foreach (Renderer renderer in renderers)
+            {
+                if (renderer != null && renderer.enabled && renderer.gameObject.activeSelf)
+                {
+                    return;
+                }
+            }
+
+            throw new InvalidOperationException($"{label} must keep at least one enabled renderer.");
+        }
+
+        private static void RequireNoEnabledRendererIfPresent(Transform root, string label)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+            {
+                if (renderer != null && renderer.enabled && renderer.gameObject.activeInHierarchy)
+                {
+                    throw new InvalidOperationException($"{label} must be hidden for the Quest MR demo.");
+                }
+            }
+        }
+
         private static void RequireSerializedReference(Object target, string propertyName, Object expectedValue)
         {
             SerializedProperty property = new SerializedObject(target).FindProperty(propertyName);
@@ -1114,6 +1291,42 @@ namespace FireExtinguisherTrainerEditor
             RequireSerializedIntAtLeast(serializedObject, "sceneSupport", 2, "Oculus project scene support");
             RequireSerializedIntAtLeast(serializedObject, "_insightPassthroughSupport", 1, "Oculus project passthrough support");
             RequireSerializedBool(serializedObject, "isPassthroughCameraAccessEnabled", true, "Oculus passthrough camera access");
+        }
+
+        private static void RequireImmersiveDebuggerDisabled()
+        {
+            Object settings = AssetDatabase.LoadAssetAtPath<Object>(ImmersiveDebuggerSettingsPath);
+            if (settings == null)
+            {
+                return;
+            }
+
+            SerializedObject serializedObject = new SerializedObject(settings);
+            RequireSerializedBool(serializedObject, "immersiveDebuggerEnabled", false, "Immersive Debugger runtime display");
+            RequireSerializedBool(serializedObject, "immersiveDebuggerDisplayAtStartup", false, "Immersive Debugger startup display");
+        }
+
+        private static void RequireOpenXrOcclusionDisabled()
+        {
+            Object occlusionFeature = Require(
+                FindOpenXrFeature("AROcclusionFeature Android"),
+                "Android Meta Quest Occlusion OpenXR feature");
+            SerializedObject serializedObject = new SerializedObject(occlusionFeature);
+            RequireSerializedBool(serializedObject, "m_enabled", false, "Android Meta Quest Occlusion feature");
+            RequireSerializedBool(serializedObject, "m_EnableHandRemoval", false, "Android Meta Quest Occlusion hand removal");
+        }
+
+        private static Object FindOpenXrFeature(string featureName)
+        {
+            foreach (Object asset in AssetDatabase.LoadAllAssetsAtPath(OpenXrPackageSettingsPath))
+            {
+                if (asset != null && asset.name == featureName)
+                {
+                    return asset;
+                }
+            }
+
+            return null;
         }
 
         private static bool SetSerializedBoolIfPresent(
@@ -1200,6 +1413,17 @@ namespace FireExtinguisherTrainerEditor
             }
         }
 
+        private static void RequireSerializedVector3(Object target, string propertyName, Vector3 expectedValue)
+        {
+            SerializedProperty property = new SerializedObject(target).FindProperty(propertyName);
+            if (property == null ||
+                property.propertyType != SerializedPropertyType.Vector3 ||
+                Vector3.Distance(property.vector3Value, expectedValue) > 0.001f)
+            {
+                throw new InvalidOperationException($"{target.name}.{propertyName} must be {expectedValue}.");
+            }
+        }
+
         private static void RequireNonTriggerCollider(GameObject root, string label)
         {
             Collider[] colliders = root.GetComponentsInChildren<Collider>(true);
@@ -1214,6 +1438,61 @@ namespace FireExtinguisherTrainerEditor
             throw new InvalidOperationException($"{label} needs at least one non-trigger collider.");
         }
 
+        private static bool IsChildOfCameraRig(Transform candidate)
+        {
+            Transform current = candidate != null ? candidate.parent : null;
+            while (current != null)
+            {
+                if (current.GetComponent<Camera>() != null ||
+                    current.GetComponent<OVRCameraRig>() != null ||
+                    current.name.Contains("EyeAnchor") ||
+                    current.name.Contains("OVRCameraRig"))
+                {
+                    return true;
+                }
+
+                current = current.parent;
+            }
+
+            return false;
+        }
+
+        private static void RequireSerializedEnum(Object target, string propertyName, int expectedValue)
+        {
+            SerializedProperty property = new SerializedObject(target).FindProperty(propertyName);
+            if (property == null ||
+                property.propertyType != SerializedPropertyType.Enum ||
+                property.enumValueIndex != expectedValue)
+            {
+                throw new InvalidOperationException($"{target.name}.{propertyName} must be enum value {expectedValue}.");
+            }
+        }
+
+        private static void RequireLocalFireParticles(FireTarget firePrefab)
+        {
+            SerializedObject serializedObject = new SerializedObject(firePrefab);
+            RequireLocalParticleReference(serializedObject, "flameParticles", "Fire flame particles");
+            RequireLocalParticleReference(serializedObject, "smokeParticles", "Fire smoke particles");
+        }
+
+        private static void RequireLocalParticleReference(
+            SerializedObject serializedObject,
+            string propertyName,
+            string label)
+        {
+            ParticleSystem particleSystem = serializedObject.FindProperty(propertyName)?.objectReferenceValue as ParticleSystem;
+            if (particleSystem == null)
+            {
+                throw new InvalidOperationException($"{label} must be assigned.");
+            }
+
+            ParticleSystem.MainModule main = particleSystem.main;
+            if (main.simulationSpace != ParticleSystemSimulationSpace.Local)
+            {
+                throw new InvalidOperationException($"{label} must use local simulation space.");
+            }
+        }
+
         private static void RequireUsableSceneExtinguisher(ExtinguisherController extinguisher)
         {
             if (!extinguisher.gameObject.activeInHierarchy)
@@ -1224,14 +1503,14 @@ namespace FireExtinguisherTrainerEditor
             Rigidbody rigidbody = Require(
                 extinguisher.GetComponent<Rigidbody>(),
                 "Station Extinguisher Rigidbody");
-            if (rigidbody.isKinematic)
+            if (!rigidbody.isKinematic)
             {
-                throw new InvalidOperationException("Station Extinguisher Rigidbody must be non-kinematic.");
+                throw new InvalidOperationException("Station Extinguisher Rigidbody must be kinematic while docked.");
             }
 
-            if (!rigidbody.useGravity)
+            if (rigidbody.useGravity)
             {
-                throw new InvalidOperationException("Station Extinguisher Rigidbody must use gravity.");
+                throw new InvalidOperationException("Station Extinguisher Rigidbody must not use gravity while docked.");
             }
 
             RequireStableRigidbody(rigidbody, "Station Extinguisher Rigidbody");

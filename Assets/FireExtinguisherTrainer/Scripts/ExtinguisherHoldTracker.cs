@@ -152,6 +152,7 @@ namespace FireExtinguisherTrainer
                 return;
             }
 
+            extinguisher.SetDockedPhysicsState(false);
             extinguisher.MarkPickedUp(holdAnchor, snapToAnchor);
             trainingManager?.RegisterHeldExtinguisher(extinguisher);
             station?.NotifyPickedUp(extinguisher);

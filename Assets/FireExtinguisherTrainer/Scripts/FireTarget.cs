@@ -82,6 +82,8 @@ namespace FireExtinguisherTrainer
 
             EnsureBaseFeedbackVisual();
             ConfigureParticleRenderersForVrComfort();
+            ConfigureFireParticleSimulation(flameParticles);
+            ConfigureFireParticleSimulation(smokeParticles);
             currentHealth = maxHealth;
             hitPulseTimer = 0f;
             transform.localScale = initialScale == Vector3.zero ? Vector3.one : initialScale;
@@ -261,8 +263,21 @@ namespace FireExtinguisherTrainer
 
         private void ConfigureParticleRenderersForVrComfort()
         {
+            ConfigureFireParticleSimulation(flameParticles);
+            ConfigureFireParticleSimulation(smokeParticles);
             VrStableParticleVisuals.ConfigureMeshParticleRenderer(flameParticles, "Capsule.fbx");
             VrStableParticleVisuals.ConfigureMeshParticleRenderer(smokeParticles, "Sphere.fbx");
+        }
+
+        private static void ConfigureFireParticleSimulation(ParticleSystem particleSystem)
+        {
+            if (particleSystem == null)
+            {
+                return;
+            }
+
+            ParticleSystem.MainModule main = particleSystem.main;
+            main.simulationSpace = ParticleSystemSimulationSpace.Local;
         }
 
         private void LockToWorldIfNeeded()

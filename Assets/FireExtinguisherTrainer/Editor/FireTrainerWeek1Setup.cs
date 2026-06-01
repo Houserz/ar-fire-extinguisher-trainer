@@ -25,6 +25,7 @@ namespace FireExtinguisherTrainerEditor
         public static void SetupWeek1MvpScene()
         {
             EnsureFolders();
+            FireTrainerEditorResources.EnsureTextMeshProEssentialResources();
 
             Material fireMaterial = CreateMaterial("Fire_Orange", new Color(1f, 0.28f, 0.04f, 1f));
             Material emberMaterial = CreateMaterial("Fire_Ember", new Color(1f, 0.75f, 0.08f, 1f));
@@ -128,16 +129,37 @@ namespace FireExtinguisherTrainerEditor
         {
             string path = $"{MaterialFolder}/{name}.mat";
             Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            Shader shader =
+                Shader.Find("Universal Render Pipeline/Unlit") ??
+                Shader.Find("Unlit/Color") ??
+                Shader.Find("Sprites/Default") ??
+                Shader.Find("Standard");
             if (material == null)
             {
-                Shader shader =
-                    Shader.Find("Universal Render Pipeline/Lit") ??
-                    Shader.Find("Standard");
                 material = new Material(shader);
                 AssetDatabase.CreateAsset(material, path);
             }
+            else if (shader != null && material.shader != shader)
+            {
+                material.shader = shader;
+            }
 
             material.color = color;
+            if (material.HasProperty("_BaseColor"))
+            {
+                material.SetColor("_BaseColor", color);
+            }
+
+            if (material.HasProperty("_Color"))
+            {
+                material.SetColor("_Color", color);
+            }
+
+            if (material.HasProperty("_EmissionColor"))
+            {
+                material.SetColor("_EmissionColor", color * 1.35f);
+            }
+
             EditorUtility.SetDirty(material);
             return material;
         }
@@ -399,6 +421,7 @@ namespace FireExtinguisherTrainerEditor
             text.color = new Color(1f, 0.95f, 0.25f, 1f);
             text.enableWordWrapping = false;
             text.richText = false;
+            FireTrainerEditorResources.ApplyDefaultFont(text);
         }
 
         private static void CreateSafetyPinSegment(
@@ -476,7 +499,7 @@ namespace FireExtinguisherTrainerEditor
             main.startSpeed = speed;
             main.startSize = new ParticleSystem.MinMaxCurve(minSize, maxSize);
             main.maxParticles = maxParticles;
-            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.simulationSpace = ParticleSystemSimulationSpace.Local;
 
             ParticleSystem.EmissionModule emission = particles.emission;
             emission.rateOverTime = rate;
@@ -740,26 +763,21 @@ namespace FireExtinguisherTrainerEditor
             canvas.renderMode = RenderMode.WorldSpace;
             canvas.worldCamera = worldCamera;
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
-            canvasObject.transform.SetParent(null, true);
-
-            if (worldCamera != null)
+            if (hudParent != null)
             {
-                Vector3 forward = Vector3.ProjectOnPlane(worldCamera.transform.forward, Vector3.up).normalized;
-                if (forward.sqrMagnitude < 0.001f)
-                {
-                    forward = Vector3.forward;
-                }
-
-                canvasObject.transform.position = worldCamera.transform.position + forward * 1.35f - Vector3.up * 0.22f;
-                canvasObject.transform.rotation = Quaternion.LookRotation(forward, Vector3.up);
+                canvasObject.transform.SetParent(hudParent, false);
+                canvasObject.transform.localPosition = new Vector3(0f, -0.18f, 1.25f);
+                canvasObject.transform.localRotation = Quaternion.identity;
+                canvasObject.transform.localScale = Vector3.one * 0.00125f;
             }
             else
             {
+                canvasObject.transform.SetParent(null, true);
                 canvasObject.transform.position = new Vector3(0f, 1.25f, 1.35f);
                 canvasObject.transform.rotation = Quaternion.identity;
+                canvasObject.transform.localScale = Vector3.one * 0.00125f;
             }
 
-            canvasObject.transform.localScale = Vector3.one * 0.00135f;
             canvasRect.sizeDelta = new Vector2(960f, 470f);
 
             TrainingHUD hud = canvasObject.GetComponent<TrainingHUD>();
@@ -793,7 +811,14 @@ namespace FireExtinguisherTrainerEditor
             SetObjectReference(hud, "fireSlider", fireSlider);
             SetObjectReference(hud, "resultPanel", resultPanel);
             SetObjectReference(hud, "introPanel", introPanel);
-            SetBool(hud, "detachFromCameraRigOnStart", true);
+            SetEnum(hud, "anchorMode", (int)HudAnchorMode.WorldLocked);
+            SetBool(hud, "detachFromCameraRigOnStart", false);
+            SetBool(hud, "followHeadsetInRuntime", false);
+            SetObjectReference(hud, "headsetAnchor", hudParent);
+            SetVector3(hud, "headsetLocalPosition", new Vector3(0f, -0.18f, 1.25f));
+            SetVector3(hud, "headsetLocalEulerAngles", Vector3.zero);
+            SetFloat(hud, "headsetLocalScale", 0.00125f);
+            hud.ConfigureWorldLocked(hudParent, worldCamera);
 
             return hud;
         }
@@ -835,6 +860,7 @@ namespace FireExtinguisherTrainerEditor
             text.color = Color.white;
             text.alignment = TextAlignmentOptions.Left;
             text.textWrappingMode = TextWrappingModes.Normal;
+            FireTrainerEditorResources.ApplyDefaultFont(text);
             return text;
         }
 
@@ -1054,6 +1080,18 @@ namespace FireExtinguisherTrainerEditor
             if (property != null && property.propertyType == SerializedPropertyType.Integer)
             {
                 property.intValue = value;
+                serializedObject.ApplyModifiedProperties();
+                EditorUtility.SetDirty(target);
+            }
+        }
+
+        private static void SetEnum(Object target, string propertyName, int value)
+        {
+            SerializedObject serializedObject = new SerializedObject(target);
+            SerializedProperty property = serializedObject.FindProperty(propertyName);
+            if (property != null && property.propertyType == SerializedPropertyType.Enum)
+            {
+                property.enumValueIndex = value;
                 serializedObject.ApplyModifiedProperties();
                 EditorUtility.SetDirty(target);
             }

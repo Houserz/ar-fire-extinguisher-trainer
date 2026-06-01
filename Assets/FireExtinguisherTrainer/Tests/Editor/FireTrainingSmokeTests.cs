@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using FireExtinguisherTrainer;
 using NUnit.Framework;
 using TMPro;
@@ -255,6 +256,7 @@ namespace FireExtinguisherTrainerTests
             Assert.AreNotSame(firstBottle, replacementBottle);
             Assert.IsTrue(firstBottle.IsHeld);
             Assert.IsFalse(replacementBottle.IsHeld);
+            AssertDocked(replacementBottle);
 
             PullAndAimAtBase(manager, fire);
 
@@ -284,6 +286,7 @@ namespace FireExtinguisherTrainerTests
             Assert.IsTrue(replacementReport.UsedReplacement);
             Assert.AreEqual(2, replacementReport.ExtinguishersUsed);
             Assert.AreEqual(PassStep.PullPin, replacementReport.CurrentStep);
+            AssertDynamic(replacementBottle);
         }
 
         [Test]
@@ -304,6 +307,7 @@ namespace FireExtinguisherTrainerTests
             Assert.IsNotNull(preplaced.GetComponent<ExtinguisherHoldTracker>());
             Assert.IsFalse(preplaced.IsHeld);
             Assert.IsFalse(preplaced.IsEmpty);
+            AssertDocked(preplaced);
 
             preplaced.GetComponent<ExtinguisherHoldTracker>().DebugPickUp();
             TrackStationAvailable(station);
@@ -312,6 +316,7 @@ namespace FireExtinguisherTrainerTests
             Assert.IsNull(preplaced.transform.parent);
             Assert.IsNull(station.AvailableExtinguisher);
             Assert.IsTrue(station.ReplacementQueued);
+            AssertDynamic(preplaced);
 
             station.DebugAdvanceReplacementTimer(5f);
             TrackStationAvailable(station);
@@ -321,6 +326,7 @@ namespace FireExtinguisherTrainerTests
             Assert.AreNotSame(preplaced, station.AvailableExtinguisher);
             Assert.IsFalse(station.AvailableExtinguisher.IsHeld);
             Assert.IsFalse(station.AvailableExtinguisher.IsEmpty);
+            AssertDocked(station.AvailableExtinguisher);
         }
 
         [Test]
@@ -337,6 +343,8 @@ namespace FireExtinguisherTrainerTests
             float stationForwardDistance = Vector3.Dot(layout.StationPose.position - user.position, user.forward);
             Assert.AreEqual(SpatialPlacementSource.Fallback, layout.Source);
             Assert.That(layout.Message, Does.Contain("fallback"));
+            Assert.That(layout.FirePose.position.y, Is.EqualTo(0.05f).Within(0.001f));
+            Assert.That(layout.StationPose.position.y, Is.EqualTo(0.02f).Within(0.001f));
             Assert.That(fireForwardDistance, Is.InRange(2f, 3f));
             Assert.That(stationForwardDistance, Is.InRange(0.8f, 1.4f));
             Assert.GreaterOrEqual(FlatDistance(layout.FirePose.position, layout.StationPose.position), 1f);
@@ -354,8 +362,8 @@ namespace FireExtinguisherTrainerTests
             Assert.IsTrue(placement.TryGetLayoutOnHorizontalPlane(planePose, new Vector2(5f, 5f), out SpatialTrainingLayout layout));
 
             Assert.AreEqual(SpatialPlacementSource.DetectedPlane, layout.Source);
-            Assert.That(layout.FirePose.position.y, Is.EqualTo(0.18f).Within(0.001f));
-            Assert.That(layout.StationPose.position.y, Is.EqualTo(0.18f).Within(0.001f));
+            Assert.That(layout.FirePose.position.y, Is.EqualTo(0.23f).Within(0.001f));
+            Assert.That(layout.StationPose.position.y, Is.EqualTo(0.2f).Within(0.001f));
             Assert.That(Vector3.Dot(layout.FirePose.position - user.position, user.forward), Is.InRange(2f, 3f));
             Assert.That(Vector3.Dot(layout.StationPose.position - user.position, user.forward), Is.InRange(0.8f, 1.4f));
             Assert.GreaterOrEqual(FlatDistance(layout.FirePose.position, layout.StationPose.position), 1f);
@@ -372,8 +380,8 @@ namespace FireExtinguisherTrainerTests
             Assert.IsTrue(placement.TryGetFallbackLayout(out SpatialTrainingLayout layout));
 
             Assert.AreEqual(SpatialPlacementSource.Fallback, layout.Source);
-            Assert.That(layout.FirePose.position.y, Is.EqualTo(0f).Within(0.001f));
-            Assert.That(layout.StationPose.position.y, Is.EqualTo(0f).Within(0.001f));
+            Assert.That(layout.FirePose.position.y, Is.EqualTo(0.05f).Within(0.001f));
+            Assert.That(layout.StationPose.position.y, Is.EqualTo(0.02f).Within(0.001f));
             Assert.That(FlatForwardDistance(layout.FirePose.position, camera), Is.InRange(2f, 3f));
             Assert.That(FlatForwardDistance(layout.StationPose.position, camera), Is.InRange(0.8f, 1.4f));
         }
@@ -439,12 +447,15 @@ namespace FireExtinguisherTrainerTests
         public void FireTrainingManagerWaitsForSpatialScanThenStartsFallbackTraining()
         {
             FireTarget firePrefab = CreateComponent<FireTarget>("Scan Fire Prefab");
+            AddVisiblePrimitive(firePrefab.transform, "Fire Visual");
             FireSpawner spawner = CreateComponent<FireSpawner>("Scan Fire Spawner");
             SetPrivateObject(spawner, "firePrefab", firePrefab);
 
             Transform user = CreateTransform("User Origin", Vector3.zero);
             ExtinguisherController extinguisherPrefab = CreateComponent<ExtinguisherController>("Scan Extinguisher Prefab");
+            AddVisiblePrimitive(extinguisherPrefab.transform, "Bottle Visual");
             ExtinguisherStation station = CreateComponent<ExtinguisherStation>("Scan Station");
+            AddVisiblePrimitive(station.transform, "Station Visual");
             Transform spawn = CreateChild(station.transform, "ExtinguisherSpawnPoint", new Vector3(0f, 0.9f, -0.08f));
             station.Configure(extinguisherPrefab, spawn, user, null);
             station.EnsureAvailableExtinguisher();
@@ -484,6 +495,7 @@ namespace FireExtinguisherTrainerTests
         public void FireTrainingManagerReportsVisibleErrorWhenStationCannotSpawnBottle()
         {
             FireTarget firePrefab = CreateComponent<FireTarget>("Diagnostic Fire Prefab");
+            AddVisiblePrimitive(firePrefab.transform, "Fire Visual");
             FireSpawner spawner = CreateComponent<FireSpawner>("Diagnostic Fire Spawner");
             SetPrivateObject(spawner, "firePrefab", firePrefab);
 
@@ -509,6 +521,164 @@ namespace FireExtinguisherTrainerTests
             Assert.That(manager.CurrentReport.ResultReason, Does.Contain("Extinguisher did not spawn"));
             Assert.IsNotNull(spawner.CurrentFire);
             createdObjects.Add(spawner.CurrentFire.gameObject);
+        }
+
+        [Test]
+        public void FireTrainingManagerReportsVisibleErrorWhenSpatialStationHasNoRenderer()
+        {
+            FireTarget firePrefab = CreateComponent<FireTarget>("Visible Fire Prefab");
+            AddVisiblePrimitive(firePrefab.transform, "Fire Visual");
+            FireSpawner spawner = CreateComponent<FireSpawner>("Station Diagnostic Fire Spawner");
+            SetPrivateObject(spawner, "firePrefab", firePrefab);
+
+            Transform user = CreateTransform("User Origin", Vector3.zero);
+            ExtinguisherController extinguisherPrefab = CreateComponent<ExtinguisherController>("Visible Extinguisher Prefab");
+            AddVisiblePrimitive(extinguisherPrefab.transform, "Bottle Visual");
+            ExtinguisherStation station = CreateComponent<ExtinguisherStation>("Invisible Station");
+            Transform spawn = CreateChild(station.transform, "ExtinguisherSpawnPoint", new Vector3(0f, 0.9f, -0.08f));
+            station.Configure(extinguisherPrefab, spawn, user, null);
+            station.EnsureAvailableExtinguisher();
+            TrackStationAvailable(station);
+
+            SpatialTrainingPlacementManager placement = CreateComponent<SpatialTrainingPlacementManager>("Station Diagnostic Spatial Placement");
+            placement.Configure(user, null, station);
+            SetPrivateObject(spawner, "spatialPlacement", placement);
+
+            FireTrainingManager manager = CreateComponent<FireTrainingManager>("Station Diagnostic Training Manager");
+            SetPrivateObject(manager, "fireSpawner", spawner);
+            SetPrivateObject(manager, "extinguisherStation", station);
+
+            LogAssert.Expect(
+                LogType.Error,
+                new Regex(@"Extinguisher station spawned but no renderer was found\..*Press A / Enter to restart\."));
+            manager.BeginTraining();
+
+            Assert.AreEqual(TrainingOutcome.Failed, manager.CurrentReport.Outcome);
+            Assert.That(manager.CurrentReport.Status, Does.Contain("Extinguisher station spawned but no renderer"));
+            Assert.IsNotNull(spawner.CurrentFire);
+            createdObjects.Add(spawner.CurrentFire.gameObject);
+        }
+
+        [Test]
+        public void FireTrainingManagerReportsWhenSpatialFireIsOutsideCameraView()
+        {
+            FireTarget firePrefab = CreateComponent<FireTarget>("Frustum Fire Prefab");
+            AddVisiblePrimitive(firePrefab.transform, "Fire Visual");
+            FireSpawner spawner = CreateComponent<FireSpawner>("Frustum Fire Spawner");
+            SetPrivateObject(spawner, "firePrefab", firePrefab);
+
+            Transform placementUser = CreateTransform("Placement User", new Vector3(3.25f, 0f, 0f));
+            placementUser.rotation = Quaternion.identity;
+            var cameraObject = new GameObject("Narrow Frustum Camera");
+            createdObjects.Add(cameraObject);
+            Camera camera = cameraObject.AddComponent<Camera>();
+            camera.transform.position = Vector3.zero;
+            camera.transform.rotation = Quaternion.identity;
+            camera.fieldOfView = 25f;
+            camera.aspect = 1f;
+
+            ExtinguisherController extinguisherPrefab = CreateComponent<ExtinguisherController>("Frustum Extinguisher Prefab");
+            AddVisiblePrimitive(extinguisherPrefab.transform, "Bottle Visual");
+            ExtinguisherStation station = CreateComponent<ExtinguisherStation>("Frustum Station");
+            AddVisiblePrimitive(station.transform, "Station Visual");
+            Transform spawn = CreateChild(station.transform, "ExtinguisherSpawnPoint", new Vector3(0f, 0.9f, -0.08f));
+            station.Configure(extinguisherPrefab, spawn, placementUser, null);
+            station.EnsureAvailableExtinguisher();
+            TrackStationAvailable(station);
+
+            SpatialTrainingPlacementManager placement = CreateComponent<SpatialTrainingPlacementManager>("Frustum Spatial Placement");
+            placement.Configure(placementUser, null, station);
+            SetPrivateObject(spawner, "spatialPlacement", placement);
+
+            FireTrainingManager manager = CreateComponent<FireTrainingManager>("Frustum Training Manager");
+            SetPrivateObject(manager, "fireSpawner", spawner);
+            SetPrivateObject(manager, "extinguisherStation", station);
+            SetPrivateObject(manager, "playerCamera", camera);
+
+            LogAssert.Expect(
+                LogType.Error,
+                new Regex(@"Fire spawned but is outside the headset camera view\..*Press A / Enter to restart\."));
+            manager.BeginTraining();
+
+            Assert.AreEqual(TrainingOutcome.Failed, manager.CurrentReport.Outcome);
+            Assert.That(manager.CurrentReport.Status, Does.Contain("outside the headset camera view"));
+            Assert.IsNotNull(spawner.CurrentFire);
+            createdObjects.Add(spawner.CurrentFire.gameObject);
+        }
+
+        [Test]
+        public void TrainingHudHeadLocksToConfiguredAnchor()
+        {
+            TrainingHUD hud = CreateComponent<TrainingHUD>("Head Locked HUD");
+            Transform anchor = CreateTransform("CenterEyeAnchor", new Vector3(1f, 1.5f, -2f));
+            anchor.rotation = Quaternion.Euler(0f, 35f, 0f);
+
+            hud.ConfigureHeadLocked(anchor);
+
+            Assert.AreEqual(HudAnchorMode.HeadLocked, hud.AnchorMode);
+            Assert.AreSame(anchor, hud.transform.parent);
+            AssertVectorEqual(new Vector3(0f, -0.18f, 1.25f), hud.transform.localPosition);
+            Assert.That(hud.transform.localScale.x, Is.EqualTo(0.00125f).Within(0.00001f));
+            Assert.That(hud.transform.localScale.y, Is.EqualTo(0.00125f).Within(0.00001f));
+            Assert.That(hud.transform.localScale.z, Is.EqualTo(0.00125f).Within(0.00001f));
+        }
+
+        [Test]
+        public void TrainingHudWorldLocksToInitialAnchorPose()
+        {
+            TrainingHUD hud = CreateComponent<TrainingHUD>("World Locked HUD");
+            Transform anchor = CreateTransform("CenterEyeAnchor", new Vector3(1f, 1.5f, -2f));
+            anchor.rotation = Quaternion.Euler(12f, 35f, 0f);
+
+            hud.ConfigureWorldLocked(anchor);
+
+            Vector3 expectedForward = Vector3.ProjectOnPlane(anchor.forward, Vector3.up).normalized;
+            Vector3 expectedRight = Vector3.Cross(Vector3.up, expectedForward).normalized;
+            Vector3 expectedPosition = anchor.position +
+                expectedRight * 0f +
+                Vector3.up * -0.18f +
+                expectedForward * 1.25f;
+            Quaternion expectedRotation = Quaternion.LookRotation(expectedForward, Vector3.up);
+            Vector3 lockedPosition = hud.transform.position;
+            Quaternion lockedRotation = hud.transform.rotation;
+
+            Assert.AreEqual(HudAnchorMode.WorldLocked, hud.AnchorMode);
+            Assert.IsNull(hud.transform.parent);
+            AssertVectorEqual(expectedPosition, hud.transform.position);
+            Assert.That(Quaternion.Angle(expectedRotation, hud.transform.rotation), Is.LessThan(0.001f));
+            Assert.That(hud.transform.localScale.x, Is.EqualTo(0.00125f).Within(0.00001f));
+
+            anchor.position += new Vector3(2f, 0.5f, -1f);
+            anchor.rotation = Quaternion.Euler(0f, 140f, 0f);
+            InvokePrivate(hud, "LateUpdate");
+
+            AssertVectorEqual(lockedPosition, hud.transform.position);
+            Assert.That(Quaternion.Angle(lockedRotation, hud.transform.rotation), Is.LessThan(0.001f));
+        }
+
+        [Test]
+        public void VisibilityDiagnosticsIgnoreParticleRendererWhenMeshBoundsExist()
+        {
+            Renderer meshRenderer = AddVisiblePrimitive(CreateTransform("Stable Fire Root", Vector3.zero), "Stable Flame Mesh");
+            ParticleSystem particles = CreateTestFireParticles(meshRenderer.transform.parent, "Flickering Flame Particles");
+            ParticleSystemRenderer particleRenderer = particles.GetComponent<ParticleSystemRenderer>();
+
+            MethodInfo stableRendererMethod = typeof(FireTrainingManager).GetMethod(
+                "IsStableSpatialBoundsRenderer",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            MethodInfo hasStableRendererMethod = typeof(FireTrainingManager).GetMethod(
+                "HasStableSpatialBoundsRenderer",
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.IsNotNull(stableRendererMethod);
+            Assert.IsNotNull(hasStableRendererMethod);
+            Assert.IsTrue((bool)stableRendererMethod.Invoke(null, new object[] { meshRenderer }));
+            Assert.IsFalse((bool)stableRendererMethod.Invoke(null, new object[] { particleRenderer }));
+            Assert.IsTrue((bool)hasStableRendererMethod.Invoke(null, new object[]
+            {
+                new Renderer[] { particleRenderer, meshRenderer },
+                null,
+            }));
         }
 
         [Test]
@@ -560,6 +730,69 @@ namespace FireExtinguisherTrainerTests
         }
 
         [Test]
+        public void MixedRealityRuntimeCanHideHandIndicatorRenderersAndColliders()
+        {
+            GameObject leftHandBall = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            leftHandBall.name = "Left Hand Ball";
+            createdObjects.Add(leftHandBall);
+            GameObject rightHandBall = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            rightHandBall.name = "Right Hand Ball";
+            createdObjects.Add(rightHandBall);
+            GameObject stationVisual = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            stationVisual.name = "Station Visual";
+            createdObjects.Add(stationVisual);
+
+            MethodInfo method = typeof(MixedRealityTrainingRuntime).GetMethod(
+                "ApplyHandIndicatorVisibility",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.IsNotNull(method);
+
+            method.Invoke(null, new object[] { false });
+
+            Assert.IsFalse(leftHandBall.GetComponent<Renderer>().enabled);
+            Assert.IsFalse(leftHandBall.GetComponent<Collider>().enabled);
+            Assert.IsFalse(rightHandBall.GetComponent<Renderer>().enabled);
+            Assert.IsFalse(rightHandBall.GetComponent<Collider>().enabled);
+            Assert.IsTrue(stationVisual.GetComponent<Renderer>().enabled);
+            Assert.IsTrue(stationVisual.GetComponent<Collider>().enabled);
+
+            method.Invoke(null, new object[] { true });
+
+            Assert.IsTrue(leftHandBall.GetComponent<Renderer>().enabled);
+            Assert.IsTrue(leftHandBall.GetComponent<Collider>().enabled);
+            Assert.IsTrue(rightHandBall.GetComponent<Renderer>().enabled);
+            Assert.IsTrue(rightHandBall.GetComponent<Collider>().enabled);
+        }
+
+#if META_MR_SDK_INSTALLED
+        [Test]
+        public void MixedRealityRuntimeDisablesOvrPlayerControllerLocomotion()
+        {
+            GameObject player = new GameObject("FireTrainerPlayer");
+            createdObjects.Add(player);
+            player.AddComponent<CharacterController>();
+            OVRPlayerController playerController = player.AddComponent<OVRPlayerController>();
+            playerController.EnableLinearMovement = true;
+            playerController.EnableRotation = true;
+            playerController.HmdResetsY = true;
+            playerController.HmdRotatesY = true;
+            playerController.SetHaltUpdateMovement(false);
+            playerController.SetMoveScaleMultiplier(1f);
+
+            MixedRealityTrainingRuntime runtime = CreateComponent<MixedRealityTrainingRuntime>("MR Runtime");
+            runtime.ApplyTrackingStability();
+
+            bool haltUpdateMovement = false;
+            playerController.GetHaltUpdateMovement(ref haltUpdateMovement);
+            Assert.IsFalse(playerController.EnableLinearMovement);
+            Assert.IsFalse(playerController.EnableRotation);
+            Assert.IsFalse(playerController.HmdResetsY);
+            Assert.IsFalse(playerController.HmdRotatesY);
+            Assert.IsTrue(haltUpdateMovement);
+        }
+#endif
+
+        [Test]
         public void StationMoveStationToPoseKeepsBottleAtSpawnPoint()
         {
             ExtinguisherController extinguisherPrefab = CreateComponent<ExtinguisherController>("Station Extinguisher Prefab");
@@ -569,6 +802,7 @@ namespace FireExtinguisherTrainerTests
             station.Configure(extinguisherPrefab, spawn, handAnchor, null);
             station.EnsureAvailableExtinguisher();
             TrackStationAvailable(station);
+            AssertDocked(station.AvailableExtinguisher);
 
             var pose = new Pose(new Vector3(2f, 0f, 3f), Quaternion.Euler(0f, 45f, 0f));
             station.MoveStationToPose(pose);
@@ -576,6 +810,7 @@ namespace FireExtinguisherTrainerTests
             AssertVectorEqual(pose.position, station.transform.position);
             Assert.That(station.transform.rotation.eulerAngles.y, Is.EqualTo(45f).Within(0.001f));
             AssertVectorEqual(spawn.position, station.AvailableExtinguisher.transform.position);
+            AssertDocked(station.AvailableExtinguisher);
         }
 
         [Test]
@@ -1075,6 +1310,12 @@ namespace FireExtinguisherTrainerTests
             Assert.That(setupText, Does.Contain("SafetyPinLabelName"));
             Assert.That(setupText, Does.Contain("MRUK.prefab"));
             Assert.That(setupText, Does.Contain("mruk.EnableWorldLock = false"));
+            Assert.That(setupText, Does.Contain("playerController.EnableLinearMovement = false"));
+            Assert.That(setupText, Does.Contain("playerController.EnableRotation = false"));
+            Assert.That(setupText, Does.Contain("playerController.HmdResetsY = false"));
+            Assert.That(setupText, Does.Contain("playerController.HmdRotatesY = false"));
+            Assert.That(setupText, Does.Contain("playerController.SetHaltUpdateMovement(true)"));
+            Assert.That(setupText, Does.Contain("trackingOriginType = OVRManager.TrackingOrigin.FloorLevel"));
             Assert.That(setupText, Does.Contain("DeleteSceneObject(\"AR Session\")"));
             Assert.That(setupText, Does.Contain("DeleteSceneObject(MrSpatialOriginName)"));
             Assert.That(setupText, Does.Contain("RemoveComponentIfPresentByTypeName(player, \"ARPlaneManager\")"));
@@ -1083,12 +1324,42 @@ namespace FireExtinguisherTrainerTests
             Assert.That(setupText, Does.Contain("anchorSupport\", 1"));
             Assert.That(setupText, Does.Contain("SetObjectReference(placement, \"userOrigin\", placementReference)"));
             Assert.That(setupText, Does.Contain("SetBool(placement, \"preferMetaSceneFloor\", true)"));
+            Assert.That(setupText, Does.Contain("fireFloorOffset\", 0.05f"));
+            Assert.That(setupText, Does.Contain("stationFloorOffset\", 0.02f"));
             Assert.That(setupText, Does.Contain("spatialScanTimeoutSeconds\", 3f"));
+            Assert.That(setupText, Does.Contain("floorRaycastStartHeight\", 2.5f"));
+            Assert.That(setupText, Does.Contain("DeleteChildIfPresent(leftHand, \"Left Hand Ball\")"));
+            Assert.That(setupText, Does.Contain("DeleteChildIfPresent(rightHand, \"Right Hand Ball\")"));
+            Assert.That(setupText, Does.Not.Contain("CreateHandSphere"));
+            Assert.That(setupText, Does.Contain("hideHandIndicatorsInMrRuntime\", true"));
+            Assert.That(setupText, Does.Contain("RequireNoEnabledRendererIfPresent"));
+            Assert.That(setupText, Does.Contain("RequireOvrLocomotionDisabled"));
+            Assert.That(setupText, Does.Contain("FireTrainerEditorResources.RequireTextMeshProEssentialResources"));
+            Assert.That(setupText, Does.Contain("RequireImmersiveDebuggerDisabled"));
+            Assert.That(setupText, Does.Contain("ConfigureOpenXrOcclusionFeature"));
+            Assert.That(setupText, Does.Contain("RequireOpenXrOcclusionDisabled"));
+            Assert.That(setupText, Does.Contain("AROcclusionFeature Android"));
+            Assert.That(setupText, Does.Contain("Shader.Find(\"Universal Render Pipeline/Unlit\")"));
+            Assert.That(setupText, Does.Contain("_EmissionColor"));
+            Assert.That(setupText, Does.Contain("headsetLocalScale\", 0.00125f"));
+            Assert.That(setupText, Does.Contain("ConfigureWorldLocked"));
+            Assert.That(setupText, Does.Contain("HudAnchorMode.WorldLocked"));
+            Assert.That(setupText, Does.Contain("followHeadsetInRuntime\", false"));
+            Assert.That(setupText, Does.Contain("RequireLocalFireParticles"));
+            Assert.That(setupText, Does.Contain("must be kinematic while docked"));
 
             string weekSetupPath = Path.Combine(
                 Application.dataPath,
                 "FireExtinguisherTrainer/Editor/FireTrainerWeek1Setup.cs");
             string weekSetupText = File.ReadAllText(weekSetupPath);
+            Assert.That(weekSetupText, Does.Contain("FireTrainerEditorResources.EnsureTextMeshProEssentialResources"));
+            Assert.That(weekSetupText, Does.Contain("Shader.Find(\"Universal Render Pipeline/Unlit\")"));
+            Assert.That(weekSetupText, Does.Contain("_EmissionColor"));
+            Assert.That(weekSetupText, Does.Contain("ConfigureWorldLocked"));
+            Assert.That(weekSetupText, Does.Contain("HudAnchorMode.WorldLocked"));
+            Assert.That(weekSetupText, Does.Contain("followHeadsetInRuntime\", false"));
+            Assert.That(weekSetupText, Does.Contain("ParticleSystemSimulationSpace.Local"));
+            Assert.That(weekSetupText, Does.Contain("headsetLocalPosition\", new Vector3(0f, -0.18f, 1.25f)"));
             Assert.That(weekSetupText, Does.Contain("SetBool(fireTarget, \"useParticleEffects\", true)"));
             Assert.That(weekSetupText, Does.Contain("SetBool(fireTarget, \"useSmokeParticles\", true)"));
             Assert.That(weekSetupText, Does.Contain("ConfigureMeshParticleRenderer"));
@@ -1190,7 +1461,7 @@ namespace FireExtinguisherTrainerTests
         }
 
         [Test]
-        public void FireTargetComfortParticlesDoNotScaleBase()
+        public void FireTargetComfortParticlesUseLocalSimulationAndDoNotScaleBase()
         {
             var root = new GameObject("Comfort Particle Fire");
             createdObjects.Add(root);
@@ -1217,8 +1488,8 @@ namespace FireExtinguisherTrainerTests
             Vector3 rootScale = root.transform.localScale;
             Vector3 baseTargetScale = baseTarget.localScale;
 
-            Assert.AreEqual(ParticleSystemSimulationSpace.World, flameParticles.main.simulationSpace);
-            Assert.AreEqual(ParticleSystemSimulationSpace.World, smokeParticles.main.simulationSpace);
+            Assert.AreEqual(ParticleSystemSimulationSpace.Local, flameParticles.main.simulationSpace);
+            Assert.AreEqual(ParticleSystemSimulationSpace.Local, smokeParticles.main.simulationSpace);
             AssertMeshParticleRenderer(flameParticles);
             AssertMeshParticleRenderer(smokeParticles);
             Assert.IsFalse(flameObject.GetComponent<Renderer>().enabled);
@@ -1384,6 +1655,25 @@ namespace FireExtinguisherTrainerTests
             return child;
         }
 
+        private static Renderer AddVisiblePrimitive(Transform parent, string name)
+        {
+            GameObject visual = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            visual.name = name;
+            visual.transform.SetParent(parent, false);
+            visual.transform.localPosition = Vector3.zero;
+            visual.transform.localRotation = Quaternion.identity;
+            visual.transform.localScale = Vector3.one * 0.2f;
+            Collider collider = visual.GetComponent<Collider>();
+            if (collider != null)
+            {
+                Object.DestroyImmediate(collider);
+            }
+
+            Renderer renderer = visual.GetComponent<Renderer>();
+            renderer.enabled = true;
+            return renderer;
+        }
+
         private static TextMeshProUGUI CreateHudText(Transform parent, string name)
         {
             GameObject textObject = new GameObject(name);
@@ -1428,6 +1718,24 @@ namespace FireExtinguisherTrainerTests
             return particles;
         }
 
+        private static void AssertDocked(ExtinguisherController extinguisher)
+        {
+            Rigidbody rigidbody = extinguisher.GetComponent<Rigidbody>();
+            Assert.IsNotNull(rigidbody);
+            Assert.IsTrue(rigidbody.isKinematic);
+            Assert.IsFalse(rigidbody.useGravity);
+            AssertVectorEqual(Vector3.zero, rigidbody.linearVelocity);
+            AssertVectorEqual(Vector3.zero, rigidbody.angularVelocity);
+        }
+
+        private static void AssertDynamic(ExtinguisherController extinguisher)
+        {
+            Rigidbody rigidbody = extinguisher.GetComponent<Rigidbody>();
+            Assert.IsNotNull(rigidbody);
+            Assert.IsFalse(rigidbody.isKinematic);
+            Assert.IsTrue(rigidbody.useGravity);
+        }
+
         private static void AssertMeshParticleRenderer(ParticleSystem particleSystem)
         {
             ParticleSystemRenderer renderer = particleSystem.GetComponent<ParticleSystemRenderer>();
@@ -1453,6 +1761,13 @@ namespace FireExtinguisherTrainerTests
             Vector3 target = fire.transform.position + Vector3.up * 0.45f;
             Vector3 origin = fire.transform.position + new Vector3(0f, 0f, -2f);
             return new Ray(origin, (target - origin).normalized);
+        }
+
+        private static void InvokePrivate(object target, string methodName)
+        {
+            MethodInfo method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(method, $"Expected private method {methodName} on {target.GetType().Name}.");
+            method.Invoke(target, null);
         }
 
         private static void SetPrivateFloat(object target, string fieldName, float value)

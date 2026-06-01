@@ -22,6 +22,7 @@ namespace FireExtinguisherTrainer
         [SerializeField] private float stationMaxDistance = 1.4f;
         [SerializeField] private float minimumFireStationDistance = 1f;
         [SerializeField] private float planeEdgeMargin = 0.25f;
+        [SerializeField] private float fallbackGroundY = 0f;
 
         private int layoutSequenceIndex;
 
@@ -145,24 +146,51 @@ namespace FireExtinguisherTrainer
         {
             layout = default;
 
-            ARPlane plane = PickBestHorizontalPlane();
-            if (plane == null)
+            if (planeManager == null)
             {
                 return false;
             }
 
-            return TryGetSurfaceBasedLayout(
-                slot,
-                plane.transform.position,
-                plane.transform.rotation,
-                plane.extents,
-                SpatialPlacementSource.DetectedPlane,
-                out layout);
+            Transform reference = ReferenceTransform;
+            Vector3 referencePosition = reference != null ? reference.position : transform.position;
+            float bestScore = float.NegativeInfinity;
+
+            foreach (ARPlane plane in planeManager.trackables)
+            {
+                if (!IsUsableHorizontalPlane(plane))
+                {
+                    continue;
+                }
+
+                if (!TryGetSurfaceBasedLayout(
+                        slot,
+                        plane.transform.position,
+                        plane.transform.rotation,
+                        plane.extents,
+                        SpatialPlacementSource.DetectedPlane,
+                        out SpatialTrainingLayout candidate))
+                {
+                    continue;
+                }
+
+                float area = plane.size.x * plane.size.y;
+                float distancePenalty = Vector3.Distance(referencePosition, plane.center) * 0.05f;
+                float score = area - distancePenalty;
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    layout = candidate;
+                }
+            }
+
+            return bestScore > float.NegativeInfinity;
         }
 
         private bool TryGetFallbackLayout(int slot, out SpatialTrainingLayout layout)
         {
             BuildDesiredLayout(slot, out Vector3 firePosition, out Vector3 stationPosition, out Quaternion fireRotation, out Quaternion stationRotation);
+            firePosition.y = fallbackGroundY;
+            stationPosition.y = fallbackGroundY;
             var firePose = new Pose(firePosition, fireRotation);
             var stationPose = new Pose(stationPosition, stationRotation);
             layout = new SpatialTrainingLayout(firePose, stationPose, SpatialPlacementSource.Fallback);
@@ -179,8 +207,8 @@ namespace FireExtinguisherTrainer
         {
             layout = default;
             BuildDesiredLayout(slot, out Vector3 desiredFire, out Vector3 desiredStation, out Quaternion fireRotation, out Quaternion stationRotation);
-            if (!TryProjectOntoSurface(surfacePosition, surfaceRotation, extents, desiredFire, fireRotation, out Pose firePose) ||
-                !TryProjectOntoSurface(surfacePosition, surfaceRotation, extents, desiredStation, stationRotation, out Pose stationPose))
+            if (!TryProjectWithinSurface(surfacePosition, surfaceRotation, extents, desiredFire, fireRotation, out Pose firePose) ||
+                !TryProjectWithinSurface(surfacePosition, surfaceRotation, extents, desiredStation, stationRotation, out Pose stationPose))
             {
                 return false;
             }
@@ -228,44 +256,17 @@ namespace FireExtinguisherTrainer
             }
         }
 
-        private ARPlane PickBestHorizontalPlane()
+        private bool IsUsableHorizontalPlane(ARPlane plane)
         {
-            if (planeManager == null)
-            {
-                return null;
-            }
-
-            Transform reference = ReferenceTransform;
-            Vector3 referencePosition = reference != null ? reference.position : transform.position;
-            ARPlane bestPlane = null;
-            float bestScore = float.NegativeInfinity;
-
-            foreach (ARPlane plane in planeManager.trackables)
-            {
-                if (plane == null ||
-                    plane.subsumedBy != null ||
-                    !plane.gameObject.activeInHierarchy ||
-                    plane.alignment != PlaneAlignment.HorizontalUp ||
-                    plane.extents.x <= planeEdgeMargin ||
-                    plane.extents.y <= planeEdgeMargin)
-                {
-                    continue;
-                }
-
-                float area = plane.size.x * plane.size.y;
-                float distancePenalty = Vector3.Distance(referencePosition, plane.center) * 0.05f;
-                float score = area - distancePenalty;
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    bestPlane = plane;
-                }
-            }
-
-            return bestPlane;
+            return plane != null &&
+                   plane.subsumedBy == null &&
+                   plane.gameObject.activeInHierarchy &&
+                   plane.alignment == PlaneAlignment.HorizontalUp &&
+                   plane.extents.x > planeEdgeMargin &&
+                   plane.extents.y > planeEdgeMargin;
         }
 
-        private bool TryProjectOntoSurface(
+        private bool TryProjectWithinSurface(
             Vector3 surfacePosition,
             Quaternion surfaceRotation,
             Vector2 extents,
@@ -282,9 +283,15 @@ namespace FireExtinguisherTrainer
             Matrix4x4 surfaceToWorld = Matrix4x4.TRS(surfacePosition, surfaceRotation, Vector3.one);
             Matrix4x4 worldToSurface = surfaceToWorld.inverse;
             Vector3 local = worldToSurface.MultiplyPoint3x4(desiredWorldPosition);
-            local.x = Mathf.Clamp(local.x, -extents.x + planeEdgeMargin, extents.x - planeEdgeMargin);
+            if (local.x < -extents.x + planeEdgeMargin ||
+                local.x > extents.x - planeEdgeMargin ||
+                local.z < -extents.y + planeEdgeMargin ||
+                local.z > extents.y - planeEdgeMargin)
+            {
+                return false;
+            }
+
             local.y = 0f;
-            local.z = Mathf.Clamp(local.z, -extents.y + planeEdgeMargin, extents.y - planeEdgeMargin);
             pose = new Pose(surfaceToWorld.MultiplyPoint3x4(local), rotation);
             return true;
         }
@@ -296,10 +303,13 @@ namespace FireExtinguisherTrainer
             Vector3 forward = reference != null ? reference.forward : transform.forward;
             forward = FlattenDirection(forward, Vector3.forward);
 
-            Vector3 fireOffset = firePosition - origin;
-            Vector3 stationOffset = stationPosition - origin;
-            return Vector3.Dot(FlattenDirection(fireOffset, forward), forward) > 0f &&
-                   Vector3.Dot(FlattenDirection(stationOffset, forward), forward) > 0f &&
+            Vector3 flatOrigin = FlattenPosition(origin);
+            float fireForwardDistance = Vector3.Dot(FlattenPosition(firePosition) - flatOrigin, forward);
+            float stationForwardDistance = Vector3.Dot(FlattenPosition(stationPosition) - flatOrigin, forward);
+            return fireForwardDistance >= fireMinDistance &&
+                   fireForwardDistance <= fireMaxDistance &&
+                   stationForwardDistance >= stationMinDistance &&
+                   stationForwardDistance <= stationMaxDistance &&
                    Vector3.Distance(FlattenPosition(firePosition), FlattenPosition(stationPosition)) >= minimumFireStationDistance;
         }
 

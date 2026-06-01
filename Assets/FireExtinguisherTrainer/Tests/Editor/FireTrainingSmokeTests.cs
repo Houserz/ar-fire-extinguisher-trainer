@@ -360,6 +360,37 @@ namespace FireExtinguisherTrainerTests
         }
 
         [Test]
+        public void SpatialPlacementFallbackFromElevatedCameraStaysOnGround()
+        {
+            Transform camera = CreateTransform("Center Eye Camera", new Vector3(0f, 1.65f, 0f));
+            camera.rotation = Quaternion.Euler(0f, 30f, 0f);
+            SpatialTrainingPlacementManager placement = CreateComponent<SpatialTrainingPlacementManager>("Elevated Spatial Placement");
+            placement.Configure(camera);
+
+            Assert.IsTrue(placement.TryGetFallbackLayout(out SpatialTrainingLayout layout));
+
+            Assert.AreEqual(SpatialPlacementSource.Fallback, layout.Source);
+            Assert.That(layout.FirePose.position.y, Is.EqualTo(0f).Within(0.001f));
+            Assert.That(layout.StationPose.position.y, Is.EqualTo(0f).Within(0.001f));
+            Assert.That(FlatForwardDistance(layout.FirePose.position, camera), Is.InRange(2f, 3f));
+            Assert.That(FlatForwardDistance(layout.StationPose.position, camera), Is.InRange(0.8f, 1.4f));
+        }
+
+        [Test]
+        public void SpatialPlacementRejectsPlaneThatCannotContainDesiredLayout()
+        {
+            Transform user = CreateTransform("User Origin", Vector3.zero);
+            user.rotation = Quaternion.identity;
+            SpatialTrainingPlacementManager placement = CreateComponent<SpatialTrainingPlacementManager>("Small Plane Spatial Placement");
+            placement.Configure(user);
+
+            var smallPlanePose = new Pose(Vector3.zero, Quaternion.identity);
+            Assert.IsFalse(placement.TryGetLayoutOnHorizontalPlane(smallPlanePose, new Vector2(0.7f, 0.7f), out _));
+            Assert.IsTrue(placement.TryGetFallbackLayout(out SpatialTrainingLayout layout));
+            Assert.AreEqual(SpatialPlacementSource.Fallback, layout.Source);
+        }
+
+        [Test]
         public void SpatialPlacementWithoutPlaneCanReportUnavailableBeforeFallback()
         {
             Transform user = CreateTransform("User Origin", Vector3.zero);
@@ -1007,6 +1038,12 @@ namespace FireExtinguisherTrainerTests
             Assert.That(setupText, Does.Contain("ExtinguisherCapacityGauge"));
             Assert.That(setupText, Does.Contain("SafetyPinRingName"));
             Assert.That(setupText, Does.Contain("SafetyPinLabelName"));
+            Assert.That(setupText, Does.Contain("MRSpatialOrigin"));
+            Assert.That(setupText, Does.Contain("RemoveComponentIfPresent<ARPlaneManager>(player)"));
+            Assert.That(setupText, Does.Contain("RemoveComponentIfPresent<XROrigin>(player)"));
+            Assert.That(setupText, Does.Contain("xrOrigin.CameraFloorOffsetObject = cameraFloorOffset.gameObject"));
+            Assert.That(setupText, Does.Contain("SetObjectReference(placement, \"userOrigin\", placementReference)"));
+            Assert.That(setupText, Does.Contain("spatialScanTimeoutSeconds\", 3f"));
 
             string weekSetupPath = Path.Combine(
                 Application.dataPath,
@@ -1425,6 +1462,16 @@ namespace FireExtinguisherTrainerTests
             Vector2 firstFlat = new Vector2(first.x, first.z);
             Vector2 secondFlat = new Vector2(second.x, second.z);
             return Vector2.Distance(firstFlat, secondFlat);
+        }
+
+        private static float FlatForwardDistance(Vector3 position, Transform reference)
+        {
+            Vector3 flatOffset = new Vector3(
+                position.x - reference.position.x,
+                0f,
+                position.z - reference.position.z);
+            Vector3 flatForward = Vector3.ProjectOnPlane(reference.forward, Vector3.up).normalized;
+            return Vector3.Dot(flatOffset, flatForward);
         }
 
         private static ExtinguisherCapacityGauge EnsureCapacityGauge(ExtinguisherController extinguisher)

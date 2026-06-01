@@ -20,6 +20,8 @@ namespace FireExtinguisherTrainerEditor
         private const string ScenePath = "Assets/Scenes/FireTrainerWeek1.unity";
         private const string ExtinguisherPrefabPath = "Assets/FireExtinguisherTrainer/Prefabs/TrainingExtinguisher.prefab";
         private const string OculusProjectConfigPath = "Assets/Oculus/OculusProjectConfig.asset";
+        private const string MrSpatialOriginName = "MRSpatialOrigin";
+        private const string MrCameraFloorOffsetName = "MR Camera Floor Offset";
 
         [MenuItem("Tools/Fire Trainer/Setup Platform Training Scene")]
         public static void SetupPlatformTrainingScene()
@@ -87,7 +89,8 @@ namespace FireExtinguisherTrainerEditor
             SetObjectReference(station, "availableExtinguisher", stationExtinguisher);
 
             SpatialTrainingPlacementManager placement = AddComponentIfMissing<SpatialTrainingPlacementManager>(root);
-            SetObjectReference(placement, "userOrigin", player.transform);
+            Transform placementReference = centerEyeCamera != null ? centerEyeCamera.transform : player.transform;
+            SetObjectReference(placement, "userOrigin", placementReference);
             SetObjectReference(placement, "planeManager", planeManager);
             SetObjectReference(placement, "station", station);
             SetFloat(placement, "fireMinDistance", 2f);
@@ -95,6 +98,7 @@ namespace FireExtinguisherTrainerEditor
             SetFloat(placement, "stationMinDistance", 0.8f);
             SetFloat(placement, "stationMaxDistance", 1.4f);
             SetFloat(placement, "minimumFireStationDistance", 1f);
+            SetFloat(placement, "fallbackGroundY", 0f);
             SetObjectReference(spawner, "spatialPlacement", placement);
 
             MixedRealityTrainingRuntime mrRuntime = AddComponentIfMissing<MixedRealityTrainingRuntime>(root);
@@ -118,7 +122,7 @@ namespace FireExtinguisherTrainerEditor
             SetObjectReference(manager, "extinguisher", null);
             SetInt(manager, "totalExtinguishers", 0);
             SetBool(manager, "waitForSpatialPlacementOnStart", true);
-            SetFloat(manager, "spatialScanTimeoutSeconds", 4f);
+            SetFloat(manager, "spatialScanTimeoutSeconds", 3f);
             SetBool(manager, "showIntroOnFirstStart", true);
             SetFloat(manager, "introMinimumSeconds", 2.5f);
             SetFloat(manager, "introAutoDismissSeconds", 18f);
@@ -144,12 +148,33 @@ namespace FireExtinguisherTrainerEditor
             Require(player.GetComponent<CharacterController>(), "FireTrainerPlayer CharacterController");
             Require(player.GetComponent<OVRPlayerController>(), "FireTrainerPlayer OVRPlayerController");
             Require(rig.GetComponentInParent<OVRPlayerController>(), "OVRCameraRig parented under OVRPlayerController");
+            if (player.GetComponent<XROrigin>() != null || player.GetComponent<ARPlaneManager>() != null)
+            {
+                throw new InvalidOperationException("FireTrainerPlayer must not own XROrigin or ARPlaneManager in MR mode.");
+            }
+
             Require(Object.FindFirstObjectByType<ARSession>(), "ARSession");
-            XROrigin xrOrigin = Require(player.GetComponent<XROrigin>(), "FireTrainerPlayer XROrigin");
-            ARPlaneManager planeManager = Require(player.GetComponent<ARPlaneManager>(), "FireTrainerPlayer ARPlaneManager");
+            GameObject spatialOriginObject = Require(GameObject.Find(MrSpatialOriginName), MrSpatialOriginName);
+            XROrigin xrOrigin = Require(spatialOriginObject.GetComponent<XROrigin>(), "MRSpatialOrigin XROrigin");
+            ARPlaneManager planeManager = Require(spatialOriginObject.GetComponent<ARPlaneManager>(), "MRSpatialOrigin ARPlaneManager");
             if (planeManager.requestedDetectionMode != PlaneDetectionMode.Horizontal)
             {
                 throw new InvalidOperationException("ARPlaneManager must request horizontal plane detection.");
+            }
+
+            Camera centerEyeCamera = Require(rig.centerEyeAnchor != null
+                ? rig.centerEyeAnchor.GetComponent<Camera>()
+                : FindDeepChild(rig.transform, "CenterEyeAnchor")?.GetComponent<Camera>(), "CenterEyeAnchor Camera");
+            if (xrOrigin.Camera != centerEyeCamera)
+            {
+                throw new InvalidOperationException("MRSpatialOrigin XROrigin must use the center eye camera.");
+            }
+
+            if (xrOrigin.CameraFloorOffsetObject == null ||
+                xrOrigin.CameraFloorOffsetObject == player ||
+                xrOrigin.CameraFloorOffsetObject == spatialOriginObject)
+            {
+                throw new InvalidOperationException("MRSpatialOrigin needs an independent camera floor offset object.");
             }
 
             OVRManager ovrManager = Require(rig.GetComponent<OVRManager>(), "OVRManager");
@@ -203,7 +228,7 @@ namespace FireExtinguisherTrainerEditor
             RequireSerializedReference(manager, "interactionDriver", interactionDriver);
             RequireSerializedReference(manager, "rayOriginOverride", rightHand);
             RequireSerializedBool(manager, "waitForSpatialPlacementOnStart", true);
-            RequireSerializedFloat(manager, "spatialScanTimeoutSeconds", 4f);
+            RequireSerializedFloat(manager, "spatialScanTimeoutSeconds", 3f);
             RequireSerializedReference(interactionDriver, "trainingManager", manager);
             RequireSerializedReference(interactionDriver, "station", station);
             RequireSerializedReference(interactionDriver, "rightHandAnchor", rightHand);
@@ -211,11 +236,12 @@ namespace FireExtinguisherTrainerEditor
             RequireSerializedReference(interactionDriver, "playerCollisionRoot", player.transform);
             RequireSerializedReference(station, "availableExtinguisher", stationExtinguisher);
             RequireSerializedReference(spawner, "spatialPlacement", placement);
-            RequireSerializedReference(placement, "userOrigin", player.transform);
+            RequireSerializedReference(placement, "userOrigin", centerEyeCamera.transform);
             RequireSerializedReference(placement, "planeManager", planeManager);
             RequireSerializedReference(placement, "station", station);
             RequireSerializedFloat(placement, "fireMaxDistance", 3f);
             RequireSerializedFloat(placement, "stationMaxDistance", 1.4f);
+            RequireSerializedFloat(placement, "fallbackGroundY", 0f);
             RequireSerializedReference(mrRuntime, "platformRoot", platform);
             RequireSerializedReference(mrRuntime, "centerEyeCamera", xrOrigin.Camera);
 
@@ -333,13 +359,32 @@ namespace FireExtinguisherTrainerEditor
             AddComponentIfMissing<ARSession>(sessionObject);
             AddComponentIfMissing<ARInputManager>(sessionObject);
 
-            XROrigin xrOrigin = AddComponentIfMissing<XROrigin>(player);
+            RemoveComponentIfPresent<ARPlaneManager>(player);
+            RemoveComponentIfPresent<XROrigin>(player);
+
+            GameObject spatialOrigin = FindOrCreate(MrSpatialOriginName);
+            spatialOrigin.transform.position = Vector3.zero;
+            spatialOrigin.transform.rotation = Quaternion.identity;
+            spatialOrigin.transform.localScale = Vector3.one;
+
+            Transform cameraFloorOffset = spatialOrigin.transform.Find(MrCameraFloorOffsetName);
+            if (cameraFloorOffset == null)
+            {
+                cameraFloorOffset = new GameObject(MrCameraFloorOffsetName).transform;
+                cameraFloorOffset.SetParent(spatialOrigin.transform, false);
+            }
+
+            cameraFloorOffset.localPosition = Vector3.zero;
+            cameraFloorOffset.localRotation = Quaternion.identity;
+            cameraFloorOffset.localScale = Vector3.one;
+
+            XROrigin xrOrigin = AddComponentIfMissing<XROrigin>(spatialOrigin);
             xrOrigin.Camera = centerEyeCamera;
-            xrOrigin.Origin = player;
-            xrOrigin.CameraFloorOffsetObject = player;
+            xrOrigin.Origin = spatialOrigin;
+            xrOrigin.CameraFloorOffsetObject = cameraFloorOffset.gameObject;
             xrOrigin.RequestedTrackingOriginMode = XROrigin.TrackingOriginMode.Floor;
 
-            ARPlaneManager planeManager = AddComponentIfMissing<ARPlaneManager>(player);
+            ARPlaneManager planeManager = AddComponentIfMissing<ARPlaneManager>(spatialOrigin);
             planeManager.requestedDetectionMode = PlaneDetectionMode.Horizontal;
             planeManager.planePrefab = null;
 
@@ -846,6 +891,15 @@ namespace FireExtinguisherTrainerEditor
         {
             T component = gameObject.GetComponent<T>();
             return component != null ? component : gameObject.AddComponent<T>();
+        }
+
+        private static void RemoveComponentIfPresent<T>(GameObject gameObject) where T : Component
+        {
+            T component = gameObject != null ? gameObject.GetComponent<T>() : null;
+            if (component != null)
+            {
+                Object.DestroyImmediate(component);
+            }
         }
 
         private static Transform FindDeepChild(Transform parent, string childName)

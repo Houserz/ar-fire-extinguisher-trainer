@@ -514,6 +514,74 @@ RectTransform:
   m_AnchoredPosition: {x: 24, y: -232}
   m_SizeDelta: {x: 840, y: 92}
   m_Pivot: {x: 0, y: 1}
+--- !u!1 &188373840
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 188373843}
+  - component: {fileID: 188373842}
+  - component: {fileID: 188373841}
+  m_Layer: 0
+  m_Name: MRSpatialOrigin
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &188373841
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 188373840}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e1760703bbd54c04488a8d10600262ab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.XR.ARFoundation::UnityEngine.XR.ARFoundation.ARPlaneManager
+  <trackablesChanged>k__BackingField:
+    m_PersistentCalls:
+      m_Calls: []
+  m_PlanePrefab: {fileID: 0}
+  m_DetectionMode: 1
+--- !u!114 &188373842
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 188373840}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e0cb9aa70a22847b5925ee5f067c10a9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.XR.CoreUtils::Unity.XR.CoreUtils.XROrigin
+  m_Camera: {fileID: 750747828}
+  m_OriginBaseGameObject: {fileID: 188373840}
+  m_CameraFloorOffsetObject: {fileID: 277006990}
+  m_RequestedTrackingOriginMode: 2
+  m_CameraYOffset: 1.1176
+--- !u!4 &188373843
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 188373840}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 277006991}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &223117565
 GameObject:
   m_ObjectHideFlags: 0
@@ -544,6 +612,37 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1786303481}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &277006990
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 277006991}
+  m_Layer: 0
+  m_Name: MR Camera Floor Offset
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &277006991
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 277006990}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 188373843}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &289855080
 GameObject:
@@ -2603,8 +2702,6 @@ GameObject:
   - component: {fileID: 1299024149}
   - component: {fileID: 1299024151}
   - component: {fileID: 1299024150}
-  - component: {fileID: 1299024153}
-  - component: {fileID: 1299024152}
   m_Layer: 0
   m_Name: FireTrainerPlayer
   m_TagString: Untagged
@@ -2681,40 +2778,6 @@ CharacterController:
   m_SkinWidth: 0.08
   m_MinMoveDistance: 0.001
   m_Center: {x: 0, y: 0.875, z: 0}
---- !u!114 &1299024152
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1299024148}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e1760703bbd54c04488a8d10600262ab, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Unity.XR.ARFoundation::UnityEngine.XR.ARFoundation.ARPlaneManager
-  <trackablesChanged>k__BackingField:
-    m_PersistentCalls:
-      m_Calls: []
-  m_PlanePrefab: {fileID: 0}
-  m_DetectionMode: 1
---- !u!114 &1299024153
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1299024148}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e0cb9aa70a22847b5925ee5f067c10a9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Unity.XR.CoreUtils::Unity.XR.CoreUtils.XROrigin
-  m_Camera: {fileID: 750747828}
-  m_OriginBaseGameObject: {fileID: 1299024148}
-  m_CameraFloorOffsetObject: {fileID: 1299024148}
-  m_RequestedTrackingOriginMode: 2
-  m_CameraYOffset: 1.1176
 --- !u!1 &1340517746
 GameObject:
   m_ObjectHideFlags: 0
@@ -3652,6 +3715,11 @@ Transform:
   m_Children: []
   m_Father: {fileID: 416954187}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!4 &1785067561 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 400002, guid: 126d619cf4daa52469682f85c1378b4a, type: 3}
+  m_PrefabInstance: {fileID: 750747822}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1786303480
 GameObject:
   m_ObjectHideFlags: 0
@@ -4018,7 +4086,7 @@ MonoBehaviour:
   totalExtinguishers: 0
   useExtinguisherNozzleRay: 1
   waitForSpatialPlacementOnStart: 1
-  spatialScanTimeoutSeconds: 4
+  spatialScanTimeoutSeconds: 3
   showIntroOnFirstStart: 1
   introMinimumSeconds: 2.5
   introAutoDismissSeconds: 18
@@ -4072,8 +4140,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bef0f7459e544f048a0f263944921b96, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::FireExtinguisherTrainer.SpatialTrainingPlacementManager
-  userOrigin: {fileID: 1299024149}
-  planeManager: {fileID: 1299024152}
+  userOrigin: {fileID: 1785067561}
+  planeManager: {fileID: 188373841}
   station: {fileID: 821900039}
   preferDetectedPlanes: 1
   fireMinDistance: 2
@@ -4082,6 +4150,7 @@ MonoBehaviour:
   stationMaxDistance: 1.4
   minimumFireStationDistance: 1
   planeEdgeMargin: 0.25
+  fallbackGroundY: 0
 --- !u!114 &1947521675
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4440,3 +4509,4 @@ SceneRoots:
   - {fileID: 1786303481}
   - {fileID: 615273938}
   - {fileID: 1180979276}
+  - {fileID: 188373843}

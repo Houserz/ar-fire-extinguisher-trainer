@@ -411,7 +411,7 @@ namespace FireExtinguisherTrainer
             string placementPrefix = currentPlacementSource == SpatialPlacementSource.DetectedPlane
                 ? "Horizontal surface locked. "
                 : currentPlacementSource == SpatialPlacementSource.Fallback
-                    ? "Surface scan timed out; using fallback placement. "
+                    ? "Using fallback placement. "
                     : string.Empty;
 
             if (carriedExtinguisher != null)

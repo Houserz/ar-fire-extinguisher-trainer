@@ -45,6 +45,12 @@ namespace FireExtinguisherTrainer
         public FireTarget SpawnFireAt(SpatialTrainingLayout layout)
         {
             spatialPlacement?.ApplyLayout(layout);
+            float fireStationDistance = Vector3.Distance(
+                new Vector3(layout.FirePose.position.x, 0f, layout.FirePose.position.z),
+                new Vector3(layout.StationPose.position.x, 0f, layout.StationPose.position.z));
+            Debug.Log(
+                $"Spatial training placement {layout.Source}: fire={layout.FirePose.position:F2}, station={layout.StationPose.position:F2}, fireStationDistance={fireStationDistance:F2}m",
+                this);
             return SpawnFireAt(layout.FirePose.position, layout.FirePose.rotation, layout.Source);
         }
 

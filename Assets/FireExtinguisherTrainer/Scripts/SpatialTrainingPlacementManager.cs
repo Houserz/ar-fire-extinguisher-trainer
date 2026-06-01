@@ -17,9 +17,9 @@ namespace FireExtinguisherTrainer
         [SerializeField] private ExtinguisherStation station;
         [SerializeField] private bool preferDetectedPlanes = true;
         [SerializeField] private float fireMinDistance = 2f;
-        [SerializeField] private float fireMaxDistance = 4f;
+        [SerializeField] private float fireMaxDistance = 3f;
         [SerializeField] private float stationMinDistance = 0.8f;
-        [SerializeField] private float stationMaxDistance = 1.8f;
+        [SerializeField] private float stationMaxDistance = 1.4f;
         [SerializeField] private float minimumFireStationDistance = 1f;
         [SerializeField] private float planeEdgeMargin = 0.25f;
 
@@ -37,30 +37,113 @@ namespace FireExtinguisherTrainer
 
         public bool TryPrepareTrainingLayout(out Pose firePose)
         {
-            if (!TryGetTrainingPoses(out firePose, out Pose stationPose))
+            if (!TryPrepareTrainingLayout(out SpatialTrainingLayout layout))
+            {
+                firePose = default;
+                return false;
+            }
+
+            firePose = layout.FirePose;
+            return true;
+        }
+
+        public bool TryPrepareTrainingLayout(out SpatialTrainingLayout layout)
+        {
+            if (!TryGetTrainingLayout(allowFallback: true, out layout))
             {
                 return false;
             }
 
-            station?.MoveStationToPose(stationPose);
+            ApplyLayout(layout);
             return true;
         }
 
         public bool TryGetTrainingPoses(out Pose firePose, out Pose stationPose)
         {
-            int slot = layoutSequenceIndex++;
-            if (preferDetectedPlanes && TryGetPlaneBasedPoses(slot, out firePose, out stationPose))
+            if (!TryGetTrainingLayout(allowFallback: true, out SpatialTrainingLayout layout))
             {
+                firePose = default;
+                stationPose = default;
+                return false;
+            }
+
+            firePose = layout.FirePose;
+            stationPose = layout.StationPose;
+            return true;
+        }
+
+        public bool TryGetTrainingLayout(bool allowFallback, out SpatialTrainingLayout layout)
+        {
+            int slot = layoutSequenceIndex;
+            if (preferDetectedPlanes && TryGetPlaneBasedLayout(slot, out layout))
+            {
+                layoutSequenceIndex++;
                 return true;
             }
 
-            return TryGetFallbackPoses(slot, out firePose, out stationPose);
+            if (allowFallback && TryGetFallbackLayout(slot, out layout))
+            {
+                layoutSequenceIndex++;
+                return true;
+            }
+
+            layout = default;
+            return false;
         }
 
-        private bool TryGetPlaneBasedPoses(int slot, out Pose firePose, out Pose stationPose)
+        public bool TryGetDetectedPlaneLayout(out SpatialTrainingLayout layout)
         {
-            firePose = default;
-            stationPose = default;
+            int slot = layoutSequenceIndex;
+            if (!preferDetectedPlanes || !TryGetPlaneBasedLayout(slot, out layout))
+            {
+                layout = default;
+                return false;
+            }
+
+            layoutSequenceIndex++;
+            return true;
+        }
+
+        public bool TryGetFallbackLayout(out SpatialTrainingLayout layout)
+        {
+            int slot = layoutSequenceIndex;
+            if (!TryGetFallbackLayout(slot, out layout))
+            {
+                layout = default;
+                return false;
+            }
+
+            layoutSequenceIndex++;
+            return true;
+        }
+
+        public bool TryGetLayoutOnHorizontalPlane(Pose planePose, Vector2 planeExtents, out SpatialTrainingLayout layout)
+        {
+            int slot = layoutSequenceIndex;
+            if (!TryGetSurfaceBasedLayout(
+                    slot,
+                    planePose.position,
+                    planePose.rotation,
+                    planeExtents,
+                    SpatialPlacementSource.DetectedPlane,
+                    out layout))
+            {
+                layout = default;
+                return false;
+            }
+
+            layoutSequenceIndex++;
+            return true;
+        }
+
+        public void ApplyLayout(SpatialTrainingLayout layout)
+        {
+            station?.MoveStationToPose(layout.StationPose);
+        }
+
+        private bool TryGetPlaneBasedLayout(int slot, out SpatialTrainingLayout layout)
+        {
+            layout = default;
 
             ARPlane plane = PickBestHorizontalPlane();
             if (plane == null)
@@ -68,22 +151,42 @@ namespace FireExtinguisherTrainer
                 return false;
             }
 
+            return TryGetSurfaceBasedLayout(
+                slot,
+                plane.transform.position,
+                plane.transform.rotation,
+                plane.extents,
+                SpatialPlacementSource.DetectedPlane,
+                out layout);
+        }
+
+        private bool TryGetFallbackLayout(int slot, out SpatialTrainingLayout layout)
+        {
+            BuildDesiredLayout(slot, out Vector3 firePosition, out Vector3 stationPosition, out Quaternion fireRotation, out Quaternion stationRotation);
+            var firePose = new Pose(firePosition, fireRotation);
+            var stationPose = new Pose(stationPosition, stationRotation);
+            layout = new SpatialTrainingLayout(firePose, stationPose, SpatialPlacementSource.Fallback);
+            return IsValidLayout(layout.FirePose.position, layout.StationPose.position);
+        }
+
+        private bool TryGetSurfaceBasedLayout(
+            int slot,
+            Vector3 surfacePosition,
+            Quaternion surfaceRotation,
+            Vector2 extents,
+            SpatialPlacementSource source,
+            out SpatialTrainingLayout layout)
+        {
+            layout = default;
             BuildDesiredLayout(slot, out Vector3 desiredFire, out Vector3 desiredStation, out Quaternion fireRotation, out Quaternion stationRotation);
-            if (!TryProjectOntoPlane(plane, desiredFire, fireRotation, out firePose) ||
-                !TryProjectOntoPlane(plane, desiredStation, stationRotation, out stationPose))
+            if (!TryProjectOntoSurface(surfacePosition, surfaceRotation, extents, desiredFire, fireRotation, out Pose firePose) ||
+                !TryProjectOntoSurface(surfacePosition, surfaceRotation, extents, desiredStation, stationRotation, out Pose stationPose))
             {
                 return false;
             }
 
-            return IsValidLayout(firePose.position, stationPose.position);
-        }
-
-        private bool TryGetFallbackPoses(int slot, out Pose firePose, out Pose stationPose)
-        {
-            BuildDesiredLayout(slot, out Vector3 firePosition, out Vector3 stationPosition, out Quaternion fireRotation, out Quaternion stationRotation);
-            firePose = new Pose(firePosition, fireRotation);
-            stationPose = new Pose(stationPosition, stationRotation);
-            return IsValidLayout(firePose.position, stationPose.position);
+            layout = new SpatialTrainingLayout(firePose, stationPose, source);
+            return IsValidLayout(layout.FirePose.position, layout.StationPose.position);
         }
 
         private void BuildDesiredLayout(
@@ -162,20 +265,27 @@ namespace FireExtinguisherTrainer
             return bestPlane;
         }
 
-        private bool TryProjectOntoPlane(ARPlane plane, Vector3 desiredWorldPosition, Quaternion rotation, out Pose pose)
+        private bool TryProjectOntoSurface(
+            Vector3 surfacePosition,
+            Quaternion surfaceRotation,
+            Vector2 extents,
+            Vector3 desiredWorldPosition,
+            Quaternion rotation,
+            out Pose pose)
         {
             pose = default;
-            Vector2 extents = plane.extents;
             if (extents.x <= planeEdgeMargin || extents.y <= planeEdgeMargin)
             {
                 return false;
             }
 
-            Vector3 local = plane.transform.InverseTransformPoint(desiredWorldPosition);
+            Matrix4x4 surfaceToWorld = Matrix4x4.TRS(surfacePosition, surfaceRotation, Vector3.one);
+            Matrix4x4 worldToSurface = surfaceToWorld.inverse;
+            Vector3 local = worldToSurface.MultiplyPoint3x4(desiredWorldPosition);
             local.x = Mathf.Clamp(local.x, -extents.x + planeEdgeMargin, extents.x - planeEdgeMargin);
             local.y = 0f;
             local.z = Mathf.Clamp(local.z, -extents.y + planeEdgeMargin, extents.y - planeEdgeMargin);
-            pose = new Pose(plane.transform.TransformPoint(local), rotation);
+            pose = new Pose(surfaceToWorld.MultiplyPoint3x4(local), rotation);
             return true;
         }
 

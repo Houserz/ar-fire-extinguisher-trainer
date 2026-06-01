@@ -330,13 +330,45 @@ namespace FireExtinguisherTrainerTests
             SpatialTrainingPlacementManager placement = CreateComponent<SpatialTrainingPlacementManager>("Spatial Placement");
             placement.Configure(user);
 
-            Assert.IsTrue(placement.TryGetTrainingPoses(out Pose firePose, out Pose stationPose));
+            Assert.IsTrue(placement.TryGetFallbackLayout(out SpatialTrainingLayout layout));
 
-            float fireForwardDistance = Vector3.Dot(firePose.position - user.position, user.forward);
-            float stationForwardDistance = Vector3.Dot(stationPose.position - user.position, user.forward);
-            Assert.That(fireForwardDistance, Is.InRange(2f, 4f));
-            Assert.That(stationForwardDistance, Is.InRange(0.8f, 1.8f));
-            Assert.GreaterOrEqual(FlatDistance(firePose.position, stationPose.position), 1f);
+            float fireForwardDistance = Vector3.Dot(layout.FirePose.position - user.position, user.forward);
+            float stationForwardDistance = Vector3.Dot(layout.StationPose.position - user.position, user.forward);
+            Assert.AreEqual(SpatialPlacementSource.Fallback, layout.Source);
+            Assert.That(fireForwardDistance, Is.InRange(2f, 3f));
+            Assert.That(stationForwardDistance, Is.InRange(0.8f, 1.4f));
+            Assert.GreaterOrEqual(FlatDistance(layout.FirePose.position, layout.StationPose.position), 1f);
+        }
+
+        [Test]
+        public void SpatialPlacementHorizontalPlaneLayoutStaysOnPlane()
+        {
+            Transform user = CreateTransform("User Origin", Vector3.zero);
+            user.rotation = Quaternion.identity;
+            SpatialTrainingPlacementManager placement = CreateComponent<SpatialTrainingPlacementManager>("Spatial Placement");
+            placement.Configure(user);
+
+            var planePose = new Pose(new Vector3(0f, 0.18f, 0f), Quaternion.identity);
+            Assert.IsTrue(placement.TryGetLayoutOnHorizontalPlane(planePose, new Vector2(5f, 5f), out SpatialTrainingLayout layout));
+
+            Assert.AreEqual(SpatialPlacementSource.DetectedPlane, layout.Source);
+            Assert.That(layout.FirePose.position.y, Is.EqualTo(0.18f).Within(0.001f));
+            Assert.That(layout.StationPose.position.y, Is.EqualTo(0.18f).Within(0.001f));
+            Assert.That(Vector3.Dot(layout.FirePose.position - user.position, user.forward), Is.InRange(2f, 3f));
+            Assert.That(Vector3.Dot(layout.StationPose.position - user.position, user.forward), Is.InRange(0.8f, 1.4f));
+            Assert.GreaterOrEqual(FlatDistance(layout.FirePose.position, layout.StationPose.position), 1f);
+        }
+
+        [Test]
+        public void SpatialPlacementWithoutPlaneCanReportUnavailableBeforeFallback()
+        {
+            Transform user = CreateTransform("User Origin", Vector3.zero);
+            SpatialTrainingPlacementManager placement = CreateComponent<SpatialTrainingPlacementManager>("Spatial Placement");
+            placement.Configure(user);
+
+            Assert.IsFalse(placement.TryGetTrainingLayout(allowFallback: false, out _));
+            Assert.IsTrue(placement.TryGetTrainingLayout(allowFallback: true, out SpatialTrainingLayout layout));
+            Assert.AreEqual(SpatialPlacementSource.Fallback, layout.Source);
         }
 
         [Test]
@@ -362,8 +394,54 @@ namespace FireExtinguisherTrainerTests
             FireTarget spawnedFire = spawner.SpawnRandomFire();
             createdObjects.Add(spawnedFire.gameObject);
 
-            Assert.That(Vector3.Dot(spawnedFire.transform.position - user.position, user.forward), Is.InRange(2f, 4f));
-            Assert.That(Vector3.Dot(station.transform.position - user.position, user.forward), Is.InRange(0.8f, 1.8f));
+            Assert.AreEqual(SpatialPlacementSource.Fallback, spawner.LastPlacementSource);
+            Assert.That(Vector3.Dot(spawnedFire.transform.position - user.position, user.forward), Is.InRange(2f, 3f));
+            Assert.That(Vector3.Dot(station.transform.position - user.position, user.forward), Is.InRange(0.8f, 1.4f));
+            AssertVectorEqual(spawn.position, station.AvailableExtinguisher.transform.position);
+        }
+
+        [Test]
+        public void FireTrainingManagerWaitsForSpatialScanThenStartsFallbackTraining()
+        {
+            FireTarget firePrefab = CreateComponent<FireTarget>("Scan Fire Prefab");
+            FireSpawner spawner = CreateComponent<FireSpawner>("Scan Fire Spawner");
+            SetPrivateObject(spawner, "firePrefab", firePrefab);
+
+            Transform user = CreateTransform("User Origin", Vector3.zero);
+            ExtinguisherController extinguisherPrefab = CreateComponent<ExtinguisherController>("Scan Extinguisher Prefab");
+            ExtinguisherStation station = CreateComponent<ExtinguisherStation>("Scan Station");
+            Transform spawn = CreateChild(station.transform, "ExtinguisherSpawnPoint", new Vector3(0f, 0.9f, -0.08f));
+            station.Configure(extinguisherPrefab, spawn, user, null);
+            station.EnsureAvailableExtinguisher();
+            TrackStationAvailable(station);
+
+            SpatialTrainingPlacementManager placement = CreateComponent<SpatialTrainingPlacementManager>("Scan Spatial Placement");
+            placement.Configure(user, null, station);
+            SetPrivateObject(spawner, "spatialPlacement", placement);
+
+            FireTrainingManager manager = CreateComponent<FireTrainingManager>("Scan Training Manager");
+            SetPrivateObject(manager, "fireSpawner", spawner);
+            SetPrivateObject(manager, "extinguisherStation", station);
+            SetPrivateBool(manager, "waitForSpatialPlacementOnStart", true);
+            SetPrivateFloat(manager, "spatialScanTimeoutSeconds", 0.2f);
+
+            manager.BeginTraining();
+
+            Assert.IsTrue(manager.WaitingForSpatialPlacement);
+            Assert.IsNull(spawner.CurrentFire);
+            Assert.IsTrue(manager.CurrentReport.WaitingForSpatialPlacement);
+
+            manager.DebugRunFrame(new Ray(Vector3.zero, Vector3.forward), 0.1f);
+            Assert.IsTrue(manager.WaitingForSpatialPlacement);
+            Assert.IsNull(spawner.CurrentFire);
+
+            manager.DebugRunFrame(new Ray(Vector3.zero, Vector3.forward), 0.12f);
+            Assert.IsFalse(manager.WaitingForSpatialPlacement);
+            Assert.IsNotNull(spawner.CurrentFire);
+            createdObjects.Add(spawner.CurrentFire.gameObject);
+            Assert.AreEqual(SpatialPlacementSource.Fallback, manager.CurrentReport.PlacementSource);
+            Assert.AreEqual(TrainingOutcome.Running, manager.CurrentReport.Outcome);
+            Assert.That(manager.CurrentReport.Status, Does.Contain("fallback"));
             AssertVectorEqual(spawn.position, station.AvailableExtinguisher.transform.position);
         }
 
@@ -382,6 +460,37 @@ namespace FireExtinguisherTrainerTests
 
             AssertVectorEqual(spawnPoint.position, spawnedFire.transform.position);
             Assert.That(spawnedFire.transform.rotation.eulerAngles.y, Is.EqualTo(90f).Within(0.001f));
+        }
+
+        [Test]
+        public void MixedRealityRuntimeHidesOnlyFixedPlatformSurfaces()
+        {
+            GameObject platform = new GameObject("FireTrainer_Platform");
+            createdObjects.Add(platform);
+            GameObject floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            floor.name = "Platform Floor";
+            floor.transform.SetParent(platform.transform, false);
+            GameObject wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            wall.name = "Wall North";
+            wall.transform.SetParent(platform.transform, false);
+            GameObject stationVisual = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            stationVisual.name = "Station Base";
+            stationVisual.transform.SetParent(platform.transform, false);
+
+            MixedRealityTrainingRuntime runtime = CreateComponent<MixedRealityTrainingRuntime>("MR Runtime");
+            runtime.Configure(platform);
+            runtime.ApplyPlatformVisibility(true);
+
+            Assert.IsFalse(floor.GetComponent<Renderer>().enabled);
+            Assert.IsFalse(floor.GetComponent<Collider>().enabled);
+            Assert.IsFalse(wall.GetComponent<Renderer>().enabled);
+            Assert.IsFalse(wall.GetComponent<Collider>().enabled);
+            Assert.IsTrue(stationVisual.GetComponent<Renderer>().enabled);
+            Assert.IsTrue(stationVisual.GetComponent<Collider>().enabled);
+
+            runtime.ApplyPlatformVisibility(false);
+            Assert.IsTrue(floor.GetComponent<Renderer>().enabled);
+            Assert.IsTrue(wall.GetComponent<Renderer>().enabled);
         }
 
         [Test]

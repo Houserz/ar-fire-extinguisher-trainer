@@ -25,6 +25,10 @@ namespace FireExtinguisherTrainer
         [SerializeField] private int totalExtinguishers = 2;
         [SerializeField] private bool useExtinguisherNozzleRay = true;
 
+        [Header("MR Placement")]
+        [SerializeField] private bool waitForSpatialPlacementOnStart = false;
+        [SerializeField] private float spatialScanTimeoutSeconds = 4f;
+
         [Header("Intro")]
         [SerializeField] private bool showIntroOnFirstStart = true;
         [SerializeField] private float introMinimumSeconds = 2.5f;
@@ -63,6 +67,9 @@ namespace FireExtinguisherTrainer
         private bool introHasBeenShown;
         private bool introVisible;
         private float introElapsedSeconds;
+        private bool waitingForSpatialPlacement;
+        private float spatialScanElapsedSeconds;
+        private SpatialPlacementSource currentPlacementSource;
 
 #if UNITY_EDITOR
         private bool debugInputActive;
@@ -77,6 +84,8 @@ namespace FireExtinguisherTrainer
 
         public TrainingSessionReport CurrentReport => BuildReport();
         public bool IntroVisible => introVisible;
+        public bool WaitingForSpatialPlacement => waitingForSpatialPlacement;
+        public SpatialPlacementSource CurrentPlacementSource => currentPlacementSource;
 
         private void Awake()
         {
@@ -111,6 +120,19 @@ namespace FireExtinguisherTrainer
         private void TickTraining()
         {
             TickIntroState();
+
+            if (waitingForSpatialPlacement)
+            {
+                extinguisher?.StopSpray();
+                SetActiveFireAimFeedback(SprayHitQuality.Miss, false);
+                if (!introVisible)
+                {
+                    TickSpatialPlacementScan();
+                }
+
+                UpdateHud();
+                return;
+            }
 
             if (outcome != TrainingOutcome.Running)
             {
@@ -160,7 +182,7 @@ namespace FireExtinguisherTrainer
 
         private void ShowIntroIfNeeded()
         {
-            if (!showIntroOnFirstStart || introHasBeenShown || hud == null)
+            if (!showIntroOnFirstStart || introHasBeenShown || hud == null || waitingForSpatialPlacement)
             {
                 return;
             }
@@ -219,11 +241,77 @@ namespace FireExtinguisherTrainer
 
         public void BeginTraining()
         {
+            if (TryBeginSpatialPlacementScan())
+            {
+                return;
+            }
+
             StartTrainingWithFire(fireSpawner != null ? fireSpawner.SpawnRandomFire() : null);
+        }
+
+        private bool TryBeginSpatialPlacementScan()
+        {
+            SpatialTrainingPlacementManager placement = fireSpawner != null ? fireSpawner.SpatialPlacement : null;
+            if (!waitForSpatialPlacementOnStart || placement == null)
+            {
+                return false;
+            }
+
+            ResetRunMetrics();
+            waitingForSpatialPlacement = true;
+            spatialScanElapsedSeconds = 0f;
+            activeFire = null;
+            currentStep = PassStep.PullPin;
+            currentPlacementSource = SpatialPlacementSource.None;
+            status = "Scanning for a horizontal surface...";
+            resultReason = status;
+            return true;
+        }
+
+        private void TickSpatialPlacementScan()
+        {
+            SpatialTrainingPlacementManager placement = fireSpawner != null ? fireSpawner.SpatialPlacement : null;
+            if (placement == null)
+            {
+                waitingForSpatialPlacement = false;
+                StartTrainingWithFire(fireSpawner != null ? fireSpawner.SpawnRandomFire() : null);
+                return;
+            }
+
+            if (placement.TryGetTrainingLayout(allowFallback: false, out SpatialTrainingLayout detectedLayout))
+            {
+                StartTrainingWithSpatialLayout(detectedLayout);
+                return;
+            }
+
+            spatialScanElapsedSeconds += FrameDeltaTime;
+            status = "Scanning for a horizontal surface...";
+            resultReason = status;
+            if (spatialScanElapsedSeconds < Mathf.Max(0f, spatialScanTimeoutSeconds))
+            {
+                return;
+            }
+
+            if (placement.TryGetFallbackLayout(out SpatialTrainingLayout fallbackLayout))
+            {
+                StartTrainingWithSpatialLayout(fallbackLayout);
+                return;
+            }
+
+            waitingForSpatialPlacement = false;
+            StartTrainingWithFire(fireSpawner != null ? fireSpawner.SpawnRandomFire() : null);
+        }
+
+        private void StartTrainingWithSpatialLayout(SpatialTrainingLayout layout)
+        {
+            waitingForSpatialPlacement = false;
+            currentPlacementSource = layout.Source;
+            StartTrainingWithFire(fireSpawner != null ? fireSpawner.SpawnFireAt(layout) : null);
         }
 
         private void StartTrainingWithFire(FireTarget fire)
         {
+            waitingForSpatialPlacement = false;
             activeFire = fire;
             activeFire?.ResetFire();
 
@@ -256,9 +344,29 @@ namespace FireExtinguisherTrainer
             currentStep = carriedExtinguisher != null && carriedExtinguisher.IsPinPulled
                 ? PassStep.AimAtBase
                 : PassStep.PullPin;
+            ResetRunMetrics();
+            currentPlacementSource = fireSpawner != null
+                ? fireSpawner.LastPlacementSource
+                : SpatialPlacementSource.None;
+
+            status = BuildInitialStatus(carriedExtinguisher);
+
+            if (carriedExtinguisher != null)
+            {
+                CountExtinguisherUse(carriedExtinguisher);
+            }
+
+            if (activeFire == null || (extinguisher == null && extinguisherStation == null))
+            {
+                FailTraining("Training setup is missing a fire or extinguisher reference.");
+                Debug.LogWarning(status, this);
+            }
+        }
+
+        private void ResetRunMetrics()
+        {
             outcome = TrainingOutcome.Running;
             resultReason = "Training is running.";
-            status = BuildInitialStatus(carriedExtinguisher);
             startedAt = Time.time;
             aimHoldTimer = 0f;
             squeezeTimer = 0f;
@@ -277,17 +385,6 @@ namespace FireExtinguisherTrainer
             mistakeCounts.Clear();
             mistakeLabels.Clear();
             countedExtinguishers.Clear();
-
-            if (carriedExtinguisher != null)
-            {
-                CountExtinguisherUse(carriedExtinguisher);
-            }
-
-            if (activeFire == null || (extinguisher == null && extinguisherStation == null))
-            {
-                FailTraining("Training setup is missing a fire or extinguisher reference.");
-                Debug.LogWarning(status, this);
-            }
         }
 
         private ExtinguisherController GetReusableHeldExtinguisher()
@@ -311,16 +408,22 @@ namespace FireExtinguisherTrainer
 
         private string BuildInitialStatus(ExtinguisherController carriedExtinguisher)
         {
+            string placementPrefix = currentPlacementSource == SpatialPlacementSource.DetectedPlane
+                ? "Horizontal surface locked. "
+                : currentPlacementSource == SpatialPlacementSource.Fallback
+                    ? "Surface scan timed out; using fallback placement. "
+                    : string.Empty;
+
             if (carriedExtinguisher != null)
             {
-                return carriedExtinguisher.IsPinPulled
+                return placementPrefix + (carriedExtinguisher.IsPinPulled
                     ? "New fire ready. Keep aiming at the base and squeeze to spray."
-                    : "Extinguisher ready. Grab the top safety pin with the left hand and pull it away.";
+                    : "Extinguisher ready. Grab the top safety pin with the left hand and pull it away.");
             }
 
-            return extinguisherStation != null
+            return placementPrefix + (extinguisherStation != null
                 ? "Pick up the extinguisher from the station with the right grip."
-                : "Grab the top safety pin with the left hand and pull it away. Spray: trigger/Space.";
+                : "Grab the top safety pin with the left hand and pull it away. Spray: trigger/Space.");
         }
 
         public void RegisterHeldExtinguisher(ExtinguisherController heldExtinguisher)
@@ -1054,12 +1157,19 @@ namespace FireExtinguisherTrainer
                 WaitingForReplacement = waitingForReplacement,
                 HasHeldExtinguisher = extinguisher != null && extinguisher.IsHeld,
                 HeldExtinguisherIsEmpty = extinguisher != null && extinguisher.IsEmpty,
-                NeedsExtinguisherPickup = outcome == TrainingOutcome.Running && !HasUsableHeldExtinguisher(),
+                NeedsExtinguisherPickup = outcome == TrainingOutcome.Running && !waitingForSpatialPlacement && !HasUsableHeldExtinguisher(),
+                WaitingForSpatialPlacement = waitingForSpatialPlacement,
+                PlacementSource = currentPlacementSource,
             };
         }
 
         private string BuildInstructionText()
         {
+            if (waitingForSpatialPlacement)
+            {
+                return "Scanning for a horizontal surface...";
+            }
+
             if (outcome != TrainingOutcome.Running)
             {
                 return "Review the result, then press A or Enter to restart.";

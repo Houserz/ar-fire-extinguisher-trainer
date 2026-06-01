@@ -9,6 +9,8 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.XR.ARFoundation;
+using UnityEngine.XR.ARSubsystems;
+using Unity.XR.CoreUtils;
 using Object = UnityEngine.Object;
 
 namespace FireExtinguisherTrainerEditor
@@ -17,6 +19,7 @@ namespace FireExtinguisherTrainerEditor
     {
         private const string ScenePath = "Assets/Scenes/FireTrainerWeek1.unity";
         private const string ExtinguisherPrefabPath = "Assets/FireExtinguisherTrainer/Prefabs/TrainingExtinguisher.prefab";
+        private const string OculusProjectConfigPath = "Assets/Oculus/OculusProjectConfig.asset";
 
         [MenuItem("Tools/Fire Trainer/Setup Platform Training Scene")]
         public static void SetupPlatformTrainingScene()
@@ -41,11 +44,14 @@ namespace FireExtinguisherTrainerEditor
             Transform centerEye = rig.centerEyeAnchor != null
                 ? rig.centerEyeAnchor
                 : FindDeepChild(rig.transform, "CenterEyeAnchor");
+            Camera centerEyeCamera = centerEye != null ? centerEye.GetComponent<Camera>() : Camera.main;
 
             CreateHandSphere(leftHand, "Left Hand Ball", new Color(0.1f, 0.55f, 1f, 1f));
             CreateHandSphere(rightHand, "Right Hand Ball", new Color(1f, 0.15f, 0.08f, 1f));
 
             Transform platformRoot = CreatePlatform();
+            ARPlaneManager planeManager = CreateOrUpdateMrPlaneRuntime(player, rig, centerEyeCamera);
+            ConfigureOculusProjectPassthrough();
             Transform[] spawnPoints = CreateFireSpawnPoints(platformRoot);
             Transform stationSpawn = CreateStationVisual(platformRoot);
 
@@ -82,9 +88,20 @@ namespace FireExtinguisherTrainerEditor
 
             SpatialTrainingPlacementManager placement = AddComponentIfMissing<SpatialTrainingPlacementManager>(root);
             SetObjectReference(placement, "userOrigin", player.transform);
-            SetObjectReference(placement, "planeManager", Object.FindFirstObjectByType<ARPlaneManager>());
+            SetObjectReference(placement, "planeManager", planeManager);
             SetObjectReference(placement, "station", station);
+            SetFloat(placement, "fireMinDistance", 2f);
+            SetFloat(placement, "fireMaxDistance", 3f);
+            SetFloat(placement, "stationMinDistance", 0.8f);
+            SetFloat(placement, "stationMaxDistance", 1.4f);
+            SetFloat(placement, "minimumFireStationDistance", 1f);
             SetObjectReference(spawner, "spatialPlacement", placement);
+
+            MixedRealityTrainingRuntime mrRuntime = AddComponentIfMissing<MixedRealityTrainingRuntime>(root);
+            mrRuntime.Configure(platformRoot.gameObject, centerEyeCamera);
+            SetObjectReference(mrRuntime, "platformRoot", platformRoot.gameObject);
+            SetObjectReference(mrRuntime, "centerEyeCamera", centerEyeCamera);
+            SetBool(mrRuntime, "hidePlatformInMrRuntime", true);
 
             ExtinguisherInteractionDriver interactionDriver = CreateOrUpdateInteractionDriver(
                 rightHand,
@@ -96,10 +113,12 @@ namespace FireExtinguisherTrainerEditor
             SetObjectReference(manager, "extinguisherStation", station);
             SetObjectReference(manager, "interactionDriver", interactionDriver);
             SetObjectReference(manager, "hud", Object.FindFirstObjectByType<TrainingHUD>());
-            SetObjectReference(manager, "playerCamera", centerEye != null ? centerEye.GetComponent<Camera>() : Camera.main);
+            SetObjectReference(manager, "playerCamera", centerEyeCamera);
             SetObjectReference(manager, "rayOriginOverride", rightHand);
             SetObjectReference(manager, "extinguisher", null);
             SetInt(manager, "totalExtinguishers", 0);
+            SetBool(manager, "waitForSpatialPlacementOnStart", true);
+            SetFloat(manager, "spatialScanTimeoutSeconds", 4f);
             SetBool(manager, "showIntroOnFirstStart", true);
             SetFloat(manager, "introMinimumSeconds", 2.5f);
             SetFloat(manager, "introAutoDismissSeconds", 18f);
@@ -125,6 +144,27 @@ namespace FireExtinguisherTrainerEditor
             Require(player.GetComponent<CharacterController>(), "FireTrainerPlayer CharacterController");
             Require(player.GetComponent<OVRPlayerController>(), "FireTrainerPlayer OVRPlayerController");
             Require(rig.GetComponentInParent<OVRPlayerController>(), "OVRCameraRig parented under OVRPlayerController");
+            Require(Object.FindFirstObjectByType<ARSession>(), "ARSession");
+            XROrigin xrOrigin = Require(player.GetComponent<XROrigin>(), "FireTrainerPlayer XROrigin");
+            ARPlaneManager planeManager = Require(player.GetComponent<ARPlaneManager>(), "FireTrainerPlayer ARPlaneManager");
+            if (planeManager.requestedDetectionMode != PlaneDetectionMode.Horizontal)
+            {
+                throw new InvalidOperationException("ARPlaneManager must request horizontal plane detection.");
+            }
+
+            OVRManager ovrManager = Require(rig.GetComponent<OVRManager>(), "OVRManager");
+            if (!ovrManager.isInsightPassthroughEnabled)
+            {
+                throw new InvalidOperationException("OVRManager passthrough must be enabled.");
+            }
+
+            OVRPassthroughLayer passthroughLayer = Require(rig.GetComponent<OVRPassthroughLayer>(), "OVRPassthroughLayer");
+            if (passthroughLayer.hidden || passthroughLayer.overlayType != OVROverlay.OverlayType.Underlay)
+            {
+                throw new InvalidOperationException("OVRPassthroughLayer must be visible as an underlay.");
+            }
+
+            RequireOculusProjectPassthroughConfig();
 
             Transform leftHand = Require(FindDeepChild(rig.transform, "LeftControllerAnchor"), "LeftControllerAnchor");
             Transform rightHand = Require(FindDeepChild(rig.transform, "RightControllerAnchor"), "RightControllerAnchor");
@@ -144,6 +184,9 @@ namespace FireExtinguisherTrainerEditor
             SpatialTrainingPlacementManager placement = Require(
                 root.GetComponent<SpatialTrainingPlacementManager>(),
                 "SpatialTrainingPlacementManager");
+            MixedRealityTrainingRuntime mrRuntime = Require(
+                root.GetComponent<MixedRealityTrainingRuntime>(),
+                "MixedRealityTrainingRuntime");
             ExtinguisherStation station = Require(Object.FindFirstObjectByType<ExtinguisherStation>(), "ExtinguisherStation");
             Require(station.transform.Find("ExtinguisherSpawnPoint"), "ExtinguisherSpawnPoint");
             Transform stationExtinguisherTransform = Require(
@@ -159,6 +202,8 @@ namespace FireExtinguisherTrainerEditor
             RequireSerializedReference(manager, "extinguisherStation", station);
             RequireSerializedReference(manager, "interactionDriver", interactionDriver);
             RequireSerializedReference(manager, "rayOriginOverride", rightHand);
+            RequireSerializedBool(manager, "waitForSpatialPlacementOnStart", true);
+            RequireSerializedFloat(manager, "spatialScanTimeoutSeconds", 4f);
             RequireSerializedReference(interactionDriver, "trainingManager", manager);
             RequireSerializedReference(interactionDriver, "station", station);
             RequireSerializedReference(interactionDriver, "rightHandAnchor", rightHand);
@@ -167,7 +212,12 @@ namespace FireExtinguisherTrainerEditor
             RequireSerializedReference(station, "availableExtinguisher", stationExtinguisher);
             RequireSerializedReference(spawner, "spatialPlacement", placement);
             RequireSerializedReference(placement, "userOrigin", player.transform);
+            RequireSerializedReference(placement, "planeManager", planeManager);
             RequireSerializedReference(placement, "station", station);
+            RequireSerializedFloat(placement, "fireMaxDistance", 3f);
+            RequireSerializedFloat(placement, "stationMaxDistance", 1.4f);
+            RequireSerializedReference(mrRuntime, "platformRoot", platform);
+            RequireSerializedReference(mrRuntime, "centerEyeCamera", xrOrigin.Camera);
 
             SerializedProperty spawnPoints = new SerializedObject(spawner).FindProperty("spawnPoints");
             if (spawnPoints == null || !spawnPoints.isArray || spawnPoints.arraySize < 5)
@@ -272,6 +322,70 @@ namespace FireExtinguisherTrainerEditor
             rig.transform.localPosition = Vector3.zero;
             rig.transform.localRotation = Quaternion.identity;
             return player;
+        }
+
+        private static ARPlaneManager CreateOrUpdateMrPlaneRuntime(
+            GameObject player,
+            OVRCameraRig rig,
+            Camera centerEyeCamera)
+        {
+            GameObject sessionObject = FindOrCreate("AR Session");
+            AddComponentIfMissing<ARSession>(sessionObject);
+            AddComponentIfMissing<ARInputManager>(sessionObject);
+
+            XROrigin xrOrigin = AddComponentIfMissing<XROrigin>(player);
+            xrOrigin.Camera = centerEyeCamera;
+            xrOrigin.Origin = player;
+            xrOrigin.CameraFloorOffsetObject = player;
+            xrOrigin.RequestedTrackingOriginMode = XROrigin.TrackingOriginMode.Floor;
+
+            ARPlaneManager planeManager = AddComponentIfMissing<ARPlaneManager>(player);
+            planeManager.requestedDetectionMode = PlaneDetectionMode.Horizontal;
+            planeManager.planePrefab = null;
+
+            if (centerEyeCamera != null)
+            {
+                centerEyeCamera.clearFlags = CameraClearFlags.SolidColor;
+                centerEyeCamera.backgroundColor = new Color(0f, 0f, 0f, 0f);
+            }
+
+            if (rig != null)
+            {
+                OVRManager ovrManager = AddComponentIfMissing<OVRManager>(rig.gameObject);
+                ovrManager.isInsightPassthroughEnabled = true;
+                SetBool(ovrManager, "isInsightPassthroughEnabled", true);
+                EditorUtility.SetDirty(ovrManager);
+
+                OVRPassthroughLayer passthroughLayer = AddComponentIfMissing<OVRPassthroughLayer>(rig.gameObject);
+                passthroughLayer.hidden = false;
+                passthroughLayer.overlayType = OVROverlay.OverlayType.Underlay;
+                passthroughLayer.textureOpacity = 1f;
+                SetBool(passthroughLayer, "hidden", false);
+                EditorUtility.SetDirty(passthroughLayer);
+            }
+
+            return planeManager;
+        }
+
+        private static void ConfigureOculusProjectPassthrough()
+        {
+            Object config = AssetDatabase.LoadAssetAtPath<Object>(OculusProjectConfigPath);
+            if (config == null)
+            {
+                Debug.LogWarning($"Could not find Oculus project config at {OculusProjectConfigPath}.");
+                return;
+            }
+
+            SerializedObject serializedObject = new SerializedObject(config);
+            bool changed = false;
+            changed |= SetSerializedIntAtLeastIfPresent(serializedObject, "_insightPassthroughSupport", 1);
+            changed |= SetSerializedBoolIfPresent(serializedObject, "isPassthroughCameraAccessEnabled", true);
+
+            if (changed)
+            {
+                serializedObject.ApplyModifiedProperties();
+                EditorUtility.SetDirty(config);
+            }
         }
 
         private static ExtinguisherInteractionDriver CreateOrUpdateInteractionDriver(
@@ -869,6 +983,111 @@ namespace FireExtinguisherTrainerEditor
                 property.objectReferenceValue != expectedValue)
             {
                 throw new InvalidOperationException($"{target.name}.{propertyName} is not bound to {expectedValue.name}.");
+            }
+        }
+
+        private static void RequireSerializedBool(Object target, string propertyName, bool expectedValue)
+        {
+            SerializedProperty property = new SerializedObject(target).FindProperty(propertyName);
+            if (property == null ||
+                property.propertyType != SerializedPropertyType.Boolean ||
+                property.boolValue != expectedValue)
+            {
+                throw new InvalidOperationException($"{target.name}.{propertyName} must be {expectedValue}.");
+            }
+        }
+
+        private static void RequireOculusProjectPassthroughConfig()
+        {
+            Object config = Require(
+                AssetDatabase.LoadAssetAtPath<Object>(OculusProjectConfigPath),
+                "OculusProjectConfig asset");
+            SerializedObject serializedObject = new SerializedObject(config);
+            RequireSerializedIntAtLeast(serializedObject, "_insightPassthroughSupport", 1, "Oculus project passthrough support");
+            RequireSerializedBool(serializedObject, "isPassthroughCameraAccessEnabled", true, "Oculus passthrough camera access");
+        }
+
+        private static bool SetSerializedBoolIfPresent(
+            SerializedObject serializedObject,
+            string propertyName,
+            bool value)
+        {
+            SerializedProperty property = serializedObject.FindProperty(propertyName);
+            if (property == null || property.propertyType != SerializedPropertyType.Boolean)
+            {
+                return false;
+            }
+
+            if (property.boolValue == value)
+            {
+                return false;
+            }
+
+            property.boolValue = value;
+            return true;
+        }
+
+        private static bool SetSerializedIntAtLeastIfPresent(
+            SerializedObject serializedObject,
+            string propertyName,
+            int minimumValue)
+        {
+            SerializedProperty property = serializedObject.FindProperty(propertyName);
+            if (property == null ||
+                (property.propertyType != SerializedPropertyType.Integer &&
+                 property.propertyType != SerializedPropertyType.Enum))
+            {
+                return false;
+            }
+
+            if (property.intValue >= minimumValue)
+            {
+                return false;
+            }
+
+            property.intValue = minimumValue;
+            return true;
+        }
+
+        private static void RequireSerializedBool(
+            SerializedObject serializedObject,
+            string propertyName,
+            bool expectedValue,
+            string label)
+        {
+            SerializedProperty property = serializedObject.FindProperty(propertyName);
+            if (property == null ||
+                property.propertyType != SerializedPropertyType.Boolean ||
+                property.boolValue != expectedValue)
+            {
+                throw new InvalidOperationException($"{label} must be {expectedValue}.");
+            }
+        }
+
+        private static void RequireSerializedIntAtLeast(
+            SerializedObject serializedObject,
+            string propertyName,
+            int minimumValue,
+            string label)
+        {
+            SerializedProperty property = serializedObject.FindProperty(propertyName);
+            if (property == null ||
+                (property.propertyType != SerializedPropertyType.Integer &&
+                 property.propertyType != SerializedPropertyType.Enum) ||
+                property.intValue < minimumValue)
+            {
+                throw new InvalidOperationException($"{label} must be enabled.");
+            }
+        }
+
+        private static void RequireSerializedFloat(Object target, string propertyName, float expectedValue)
+        {
+            SerializedProperty property = new SerializedObject(target).FindProperty(propertyName);
+            if (property == null ||
+                property.propertyType != SerializedPropertyType.Float ||
+                Mathf.Abs(property.floatValue - expectedValue) > 0.001f)
+            {
+                throw new InvalidOperationException($"{target.name}.{propertyName} must be {expectedValue}.");
             }
         }
 

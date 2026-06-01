@@ -10,6 +10,8 @@ namespace FireExtinguisherTrainer
         [SerializeField] private SpatialTrainingPlacementManager spatialPlacement;
 
         public FireTarget CurrentFire { get; private set; }
+        public SpatialTrainingPlacementManager SpatialPlacement => spatialPlacement;
+        public SpatialPlacementSource LastPlacementSource { get; private set; } = SpatialPlacementSource.None;
 
         private void Start()
         {
@@ -27,25 +29,44 @@ namespace FireExtinguisherTrainer
                 return null;
             }
 
+            if (spatialPlacement != null &&
+                spatialPlacement.TryPrepareTrainingLayout(out SpatialTrainingLayout layout))
+            {
+                return SpawnFireAt(layout);
+            }
+
+            Transform spawnPoint = PickSpawnPoint();
+            Vector3 position = spawnPoint != null ? spawnPoint.position : transform.position + transform.forward * 2f;
+            Quaternion rotation = spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
+
+            return SpawnFireAt(position, rotation, SpatialPlacementSource.None);
+        }
+
+        public FireTarget SpawnFireAt(SpatialTrainingLayout layout)
+        {
+            spatialPlacement?.ApplyLayout(layout);
+            return SpawnFireAt(layout.FirePose.position, layout.FirePose.rotation, layout.Source);
+        }
+
+        public FireTarget SpawnFireAt(Pose pose)
+        {
+            return SpawnFireAt(pose.position, pose.rotation, SpatialPlacementSource.None);
+        }
+
+        private FireTarget SpawnFireAt(Vector3 position, Quaternion rotation, SpatialPlacementSource placementSource)
+        {
+            if (firePrefab == null)
+            {
+                Debug.LogWarning("FireSpawner needs a fire prefab.", this);
+                return null;
+            }
+
             if (CurrentFire != null)
             {
                 Destroy(CurrentFire.gameObject);
             }
 
-            Pose spatialPose = default;
-            bool useSpatialPose = spatialPlacement != null;
-            if (useSpatialPose)
-            {
-                useSpatialPose = spatialPlacement.TryPrepareTrainingLayout(out spatialPose);
-            }
-            Transform spawnPoint = useSpatialPose ? null : PickSpawnPoint();
-            Vector3 position = useSpatialPose
-                ? spatialPose.position
-                : spawnPoint != null ? spawnPoint.position : transform.position + transform.forward * 2f;
-            Quaternion rotation = useSpatialPose
-                ? spatialPose.rotation
-                : spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
-
+            LastPlacementSource = placementSource;
             CurrentFire = Instantiate(firePrefab, position, rotation, null);
             CurrentFire.name = "Active Training Fire";
             CurrentFire.transform.SetParent(null, true);

@@ -1,3 +1,5 @@
+using UnityEngine;
+
 namespace FireExtinguisherTrainer
 {
     public enum PassStep
@@ -21,6 +23,27 @@ namespace FireExtinguisherTrainer
         Miss,
         WrongArea,
         BaseHit
+    }
+
+    public enum SpatialPlacementSource
+    {
+        None,
+        DetectedPlane,
+        Fallback
+    }
+
+    public struct SpatialTrainingLayout
+    {
+        public Pose FirePose;
+        public Pose StationPose;
+        public SpatialPlacementSource Source;
+
+        public SpatialTrainingLayout(Pose firePose, Pose stationPose, SpatialPlacementSource source)
+        {
+            FirePose = firePose;
+            StationPose = stationPose;
+            Source = source;
+        }
     }
 
     public struct TrainingSessionReport
@@ -48,5 +71,7 @@ namespace FireExtinguisherTrainer
         public bool HasHeldExtinguisher;
         public bool HeldExtinguisherIsEmpty;
         public bool NeedsExtinguisherPickup;
+        public bool WaitingForSpatialPlacement;
+        public SpatialPlacementSource PlacementSource;
     }
 }
